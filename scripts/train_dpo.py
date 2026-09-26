@@ -9,7 +9,7 @@ from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
 from qwen_dpo_alignment.data import DPODataset, collate_dpo, extract_hh_pair, load_json_or_jsonl, maybe_sample
-from qwen_dpo_alignment.modeling import dpo_loss, load_causal_lm, load_tokenizer, sequence_logps
+from qwen_dpo_alignment.modeling import amp_context, dpo_loss, load_causal_lm, load_tokenizer, make_grad_scaler, sequence_logps
 from qwen_dpo_alignment.utils import cuda_summary, ensure_dir, seed_everything, write_json
 
 
@@ -59,7 +59,7 @@ def load_hh_rows(dataset_name: str, split: str, path: str | None, max_examples: 
 def logps_for_batch(model, batch, device: str, use_fp16: bool) -> tuple[torch.Tensor, torch.Tensor]:
     chosen = batch["chosen"].to(device)
     rejected = batch["rejected"].to(device)
-    with torch.cuda.amp.autocast(enabled=use_fp16):
+    with amp_context(device, use_fp16):
         chosen_logits = model(input_ids=chosen.input_ids, attention_mask=chosen.attention_mask).logits
         rejected_logits = model(input_ids=rejected.input_ids, attention_mask=rejected.attention_mask).logits
     chosen_logps = sequence_logps(chosen_logits, chosen.labels)
@@ -137,7 +137,7 @@ def main() -> None:
     val_loader = DataLoader(val_dataset, batch_size=args.per_device_batch_size, shuffle=False, collate_fn=collate)
 
     optimizer = torch.optim.RMSprop(policy.parameters(), lr=args.learning_rate)
-    scaler = torch.cuda.amp.GradScaler(enabled=use_fp16)
+    scaler = make_grad_scaler(policy_device, use_fp16)
     best_accuracy = -1.0
     global_step = 0
     optimizer.zero_grad(set_to_none=True)

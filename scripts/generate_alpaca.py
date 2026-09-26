@@ -6,7 +6,7 @@ import time
 import torch
 from tqdm.auto import tqdm
 
-from qwen_dpo_alignment.modeling import load_causal_lm, load_tokenizer
+from qwen_dpo_alignment.modeling import amp_context, load_causal_lm, load_tokenizer
 from qwen_dpo_alignment.prompts import format_prompt
 from qwen_dpo_alignment.utils import cuda_summary, read_json, write_json
 
@@ -51,7 +51,7 @@ def main() -> None:
         if args.temperature > 0:
             generation_kwargs["temperature"] = args.temperature
             generation_kwargs["top_p"] = args.top_p
-        with torch.no_grad(), torch.cuda.amp.autocast(enabled=use_fp16):
+        with torch.no_grad(), amp_context(device, use_fp16):
             generated = model.generate(**encoded, **generation_kwargs)
         prompt_len = encoded.input_ids.shape[1]
         decoded = tokenizer.batch_decode(generated[:, prompt_len:], skip_special_tokens=True)

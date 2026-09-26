@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
 from dataclasses import dataclass
 
 import torch
@@ -32,12 +33,24 @@ def load_causal_lm(model_name_or_path: str, *, device: str, fp16: bool = True):
     dtype = torch.float16 if fp16 and device.startswith("cuda") else torch.float32
     model = AutoModelForCausalLM.from_pretrained(
         model_name_or_path,
-        torch_dtype=dtype,
+        dtype=dtype,
         trust_remote_code=True,
         low_cpu_mem_usage=True,
     )
     model.to(device)
     return model
+
+
+def amp_context(device: str, enabled: bool):
+    if enabled and str(device).startswith("cuda"):
+        return torch.amp.autocast("cuda")
+    return nullcontext()
+
+
+def make_grad_scaler(device: str, enabled: bool):
+    if enabled and str(device).startswith("cuda"):
+        return torch.amp.GradScaler("cuda", enabled=True)
+    return torch.amp.GradScaler("cpu", enabled=False)
 
 
 def sequence_logps(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:

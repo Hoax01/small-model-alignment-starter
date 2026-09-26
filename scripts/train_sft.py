@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
 from qwen_dpo_alignment.data import SFTDataset, collate_sft, load_json_or_jsonl, maybe_sample
-from qwen_dpo_alignment.modeling import load_causal_lm, load_tokenizer
+from qwen_dpo_alignment.modeling import amp_context, load_causal_lm, load_tokenizer, make_grad_scaler
 from qwen_dpo_alignment.utils import cuda_summary, ensure_dir, seed_everything, write_json
 
 
@@ -57,7 +57,7 @@ def evaluate(model, dataloader, device: str, use_fp16: bool) -> float:
     losses = []
     for batch in tqdm(dataloader, desc="eval", leave=False):
         batch = batch.to(device)
-        with torch.cuda.amp.autocast(enabled=use_fp16):
+        with amp_context(device, use_fp16):
             loss = model(
                 input_ids=batch.input_ids,
                 attention_mask=batch.attention_mask,
@@ -114,7 +114,7 @@ def main() -> None:
         return 0.5 * (1.0 + torch.cos(torch.tensor(progress * torch.pi))).item()
 
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
-    scaler = torch.cuda.amp.GradScaler(enabled=use_fp16)
+    scaler = make_grad_scaler(device, use_fp16)
 
     best_val_loss = float("inf")
     global_step = 0
@@ -125,7 +125,7 @@ def main() -> None:
         pbar = tqdm(train_loader, desc=f"epoch {epoch + 1}/{args.num_epochs}")
         for micro_step, batch in enumerate(pbar, start=1):
             batch = batch.to(device)
-            with torch.cuda.amp.autocast(enabled=use_fp16):
+            with amp_context(device, use_fp16):
                 loss = model(
                     input_ids=batch.input_ids,
                     attention_mask=batch.attention_mask,
