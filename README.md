@@ -114,12 +114,11 @@ Larger run:
 python scripts/train_sft.py \
   --model_name_or_path Qwen/Qwen2.5-0.5B \
   --output_dir outputs/sft-qwen-0.5b \
-  --max_train_examples 20000 \
+  --max_train_examples 30000 \
   --max_val_examples 1000 \
   --per_device_batch_size 2 \
   --gradient_accumulation_steps 16 \
-  --eval_steps 250 \
-  --save_steps 500
+  --eval_steps 250
 ```
 
 Defaults use `HuggingFaceH4/ultrachat_200k`, split `train_sft` and `test_sft`. You can use local JSON/JSONL with `--train_file` and `--val_file`; supported schemas include `prompt/response`, `instruction/output`, and chat `messages`.
@@ -159,8 +158,8 @@ Larger run:
 python scripts/train_dpo.py \
   --model_name_or_path outputs/sft-qwen-0.5b/best \
   --output_dir outputs/dpo-qwen-0.5b \
-  --max_train_examples 10000 \
-  --max_val_examples 500 \
+  --max_train_examples 15000 \
+  --max_val_examples 1000 \
   --per_device_batch_size 1 \
   --gradient_accumulation_steps 32 \
   --eval_steps 250 \
@@ -227,9 +226,9 @@ First complete the tiny end-to-end loop:
 
 Then scale:
 
-- AlpacaEval subset: 200
-- SFT examples: 20k
-- DPO pairs: 10k
+- AlpacaEval subset: 300
+- SFT examples: 30k
+- DPO pairs: 15k
 
 This keeps Kaggle failures cheap while we shake out memory and data issues.
 

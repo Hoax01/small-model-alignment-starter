@@ -36,7 +36,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max_grad_norm", type=float, default=1.0)
     parser.add_argument("--logging_steps", type=int, default=10)
     parser.add_argument("--eval_steps", type=int, default=250)
-    parser.add_argument("--save_steps", type=int, default=500)
+    parser.add_argument("--save_steps", type=int, default=0, help="Save intermediate step checkpoints every N optimizer steps; 0 disables them.")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--no_fp16", action="store_true")
     parser.add_argument("--no_gradient_checkpointing", action="store_true")
@@ -156,7 +156,7 @@ def main() -> None:
                         model.save_pretrained(best_dir)
                         tokenizer.save_pretrained(best_dir)
                         write_json(best_dir / "metrics.json", {"step": global_step, "val_loss": best_val_loss})
-                if global_step % args.save_steps == 0:
+                if args.save_steps > 0 and global_step % args.save_steps == 0:
                     ckpt_dir = output_dir / f"step-{global_step}"
                     model.save_pretrained(ckpt_dir)
                     tokenizer.save_pretrained(ckpt_dir)
