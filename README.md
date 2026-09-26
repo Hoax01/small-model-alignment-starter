@@ -193,13 +193,15 @@ python scripts/build_pairwise_eval.py \
   --output_path outputs/eval/dpo_vs_sft_pairs.jsonl
 ```
 
-Judge locally:
+Judge with Kaggle Models:
 
 ```bash
-python scripts/judge_pairwise_local.py \
+python scripts/judge_pairwise_kaggle.py \
   --pairs_path outputs/eval/dpo_vs_sft_pairs.jsonl \
-  --output_path outputs/eval/dpo_vs_sft_judged.jsonl \
-  --judge_model Qwen/Qwen2.5-1.5B-Instruct
+  --output_path outputs/eval/dpo_vs_sft_judged_kaggle.jsonl \
+  --judge_model google/gemini-3.6-flash \
+  --batch_size 5 \
+  --reuse_judgments
 ```
 
 Compare a model against GPT-style reference outputs from the subset:
