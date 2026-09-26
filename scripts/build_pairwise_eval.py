@@ -55,6 +55,10 @@ def main() -> None:
                 "generator_a": args.a_name if left_is_a else args.b_name,
                 "generator_b": args.b_name if left_is_a else args.a_name,
                 "answer_key": "A" if left_is_a else "B",
+                "a_outputs_generator": args.a_name,
+                "b_outputs_generator": args.b_name,
+                "reference_output": row.get("reference_output"),
+                "reference_generator": row.get("reference_generator"),
             }
         )
 
