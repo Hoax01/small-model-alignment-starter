@@ -108,7 +108,10 @@ def main() -> None:
     print(f"policy_device={policy_device} ref_device={ref_device}")
 
     tokenizer = load_tokenizer(args.model_name_or_path)
-    policy = load_causal_lm(args.model_name_or_path, device=policy_device, fp16=use_fp16)
+    # Keep the trainable policy in fp32. AMP autocast still uses fp16 compute,
+    # but GradScaler cannot unscale gradients from fp16 trainable weights.
+    policy = load_causal_lm(args.model_name_or_path, device=policy_device, fp16=False)
+    # The frozen reference can be fp16 to save memory. It is only used under no_grad.
     reference = load_causal_lm(args.model_name_or_path, device=ref_device, fp16=use_fp16)
     reference.requires_grad_(False)
     reference.eval()

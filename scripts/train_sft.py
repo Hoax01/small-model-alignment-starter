@@ -79,7 +79,9 @@ def main() -> None:
     use_fp16 = (not args.no_fp16) and device.startswith("cuda")
 
     tokenizer = load_tokenizer(args.model_name_or_path)
-    model = load_causal_lm(args.model_name_or_path, device=device, fp16=use_fp16)
+    # Keep trainable weights in fp32. AMP autocast still uses fp16 compute on T4,
+    # but GradScaler requires fp32 gradients/parameters to unscale safely.
+    model = load_causal_lm(args.model_name_or_path, device=device, fp16=False)
     if not args.no_gradient_checkpointing:
         model.gradient_checkpointing_enable()
         model.config.use_cache = False
