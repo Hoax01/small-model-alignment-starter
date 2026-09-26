@@ -23,13 +23,15 @@ python -m pip install -r requirements.txt
 python -m pip install -e . --no-deps
 ```
 
-For notebook-based Kaggle runs after pushing to GitHub, use:
+For notebook-based Kaggle runs after pushing to GitHub, use the split notebooks:
 
 ```text
-notebooks/kaggle_github_runner.ipynb
+notebooks/kaggle_train_only.ipynb
+notebooks/kaggle_generate_outputs.ipynb
+notebooks/kaggle_eval_only.ipynb
 ```
 
-Set `REPO_URL` in the first code cell, then run the notebook top to bottom.
+Set `REPO_URL` in the first code cell of each notebook you use.
 
 Check GPUs:
 
