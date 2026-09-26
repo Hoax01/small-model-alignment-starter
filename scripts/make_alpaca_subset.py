@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import argparse
+import json
+import random
 from collections import defaultdict
 
-from datasets import load_dataset
 from huggingface_hub import hf_hub_download
 
 from qwen_dpo_alignment.utils import ensure_dir, write_json
+
+
+DATASET_REPO = "tatsu-lab/alpaca_eval"
 
 
 def parse_args() -> argparse.Namespace:
@@ -17,30 +21,65 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--reference_generators",
         default="gpt4_turbo,gpt-4-turbo,gpt4,gpt-4,text_davinci_003",
-        help="Comma-separated generator name fragments to prefer from alpaca_eval_all_outputs.json.",
+        help="Comma-separated generator name fragments to prefer if using alpaca_eval_all_outputs.json.",
     )
     return parser.parse_args()
 
 
-def load_reference_outputs(generator_fragments: list[str]) -> dict[str, dict]:
-    try:
-        path = hf_hub_download(
-            repo_id="tatsu-lab/alpaca_eval",
-            filename="alpaca_eval_all_outputs.json",
-            repo_type="dataset",
+def download_json(filename: str):
+    path = hf_hub_download(repo_id=DATASET_REPO, filename=filename, repo_type="dataset")
+    with open(path, "r", encoding="utf-8") as fin:
+        return json.load(fin)
+
+
+def load_eval_set() -> list[dict]:
+    """Load AlpacaEval prompts without executing the deprecated HF dataset script."""
+    rows = download_json("alpaca_eval.json")
+    normalized = []
+    for idx, row in enumerate(rows):
+        if not row.get("instruction"):
+            continue
+        normalized.append(
+            {
+                "instruction": row["instruction"],
+                "dataset": row.get("dataset", "alpaca_eval"),
+                "source_index": idx,
+            }
         )
+    return normalized
+
+
+def load_reference_outputs(generator_fragments: list[str]) -> dict[str, dict]:
+    """Load GPT-style references keyed by instruction.
+
+    Prefer alpaca_eval_gpt4_baseline.json because it is smaller and already contains
+    one GPT-4-family baseline per instruction. If that file is unavailable, fall back
+    to alpaca_eval_all_outputs.json and select a matching generator name.
+    """
+    try:
+        baseline = download_json("alpaca_eval_gpt4_baseline.json")
+        return {
+            row["instruction"]: {
+                "instruction": row["instruction"],
+                "output": row.get("output"),
+                "generator": row.get("generator", "gpt4_baseline"),
+            }
+            for row in baseline
+            if row.get("instruction") and row.get("output")
+        }
+    except Exception as exc:
+        print(f"Could not download alpaca_eval_gpt4_baseline.json: {exc}")
+
+    try:
+        all_outputs = download_json("alpaca_eval_all_outputs.json")
     except Exception as exc:
         print(f"Could not download reference outputs: {exc}")
         return {}
 
-    import json
-
-    with open(path, "r", encoding="utf-8") as fin:
-        all_outputs = json.load(fin)
-
     grouped = defaultdict(list)
     for row in all_outputs:
-        grouped[row["instruction"]].append(row)
+        if row.get("instruction") and row.get("output"):
+            grouped[row["instruction"]].append(row)
 
     refs = {}
     for instruction, rows in grouped.items():
@@ -60,11 +99,12 @@ def load_reference_outputs(generator_fragments: list[str]) -> dict[str, dict]:
 def main() -> None:
     args = parse_args()
     output_dir = ensure_dir(args.output_dir)
-    eval_set = load_dataset("tatsu-lab/alpaca_eval", "alpaca_eval", split="eval")
+    eval_set = load_eval_set()
     if args.size > len(eval_set):
         raise ValueError(f"Requested {args.size} examples, but AlpacaEval has {len(eval_set)}.")
 
-    subset = eval_set.shuffle(seed=args.seed).select(range(args.size))
+    rng = random.Random(args.seed)
+    subset = rng.sample(eval_set, args.size)
     refs = load_reference_outputs([x.strip() for x in args.reference_generators.split(",") if x.strip()])
 
     rows = []
@@ -100,4 +140,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
