@@ -158,7 +158,7 @@ def main() -> None:
             )
             scaler.scale(loss / args.gradient_accumulation_steps).backward()
 
-            if micro_step % args.gradient_accumulation_steps == 0:
+            if micro_step % args.gradient_accumulation_steps == 0 or micro_step == len(train_loader):
                 scaler.unscale_(optimizer)
                 torch.nn.utils.clip_grad_norm_(policy.parameters(), args.max_grad_norm)
                 scaler.step(optimizer)
