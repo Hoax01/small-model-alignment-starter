@@ -1,0 +1,10 @@
+transformers>=4.43.0
+datasets
+huggingface_hub
+accelerate
+tqdm
+numpy
+pyyaml
+sentencepiece
+safetensors
+

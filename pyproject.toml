@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qwen-dpo-alignment"
+version = "0.1.0"
+description = "Small-model SFT and from-scratch DPO pipeline for Qwen2.5-0.5B on Kaggle T4x2."
+requires-python = ">=3.10"
+dependencies = [
+  "transformers>=4.43.0",
+  "datasets",
+  "huggingface_hub",
+  "accelerate",
+  "tqdm",
+  "numpy",
+  "pyyaml",
+  "sentencepiece",
+  "safetensors",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
