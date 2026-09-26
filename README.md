@@ -37,6 +37,17 @@ Check GPUs:
 nvidia-smi
 ```
 
+
+## Split Kaggle Notebooks
+
+For cleaner experiments, prefer the split notebooks:
+
+- `notebooks/kaggle_train_only.ipynb`: trains SFT and DPO checkpoints only.
+- `notebooks/kaggle_generate_outputs.ipynb`: loads base/SFT/DPO checkpoints and writes AlpacaEval generations plus pairwise JSONL files.
+- `notebooks/kaggle_eval_only.ipynb`: consumes pairwise JSONL files and optionally runs a local judge.
+
+Kaggle notebooks are isolated. To use trained checkpoints in a separate generation notebook, save a version of the training notebook and attach its outputs as an input dataset to the generation notebook. Then set `SFT_MODEL_PATH` and `DPO_MODEL_PATH` to the attached `/kaggle/input/.../outputs/.../best` paths.
+
 ## 1. Create AlpacaEval Subsets
 
 Smoke test:
