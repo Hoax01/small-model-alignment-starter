@@ -14,12 +14,12 @@ The training loops are plain PyTorch. They do not use Hugging Face `Trainer` or 
 
 ## Kaggle Setup
 
-Use the Kaggle accelerator `GPU T4 x2`. Kaggle already includes a CUDA-compatible PyTorch build, so this repo intentionally does not pin or reinstall `torch`.
+Use the Kaggle accelerator `GPU T4 x2`. Kaggle already includes a CUDA-compatible PyTorch build, so this repo intentionally does not pin or reinstall `torch`. The install also avoids upgrading NumPy, which can disturb Kaggle preinstalled packages.
 
 If running commands manually:
 
 ```bash
-python -m pip install -U -r requirements.txt
+python -m pip install -r requirements.txt
 python -m pip install -e . --no-deps
 ```
 

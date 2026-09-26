@@ -1,10 +1,8 @@
-transformers>=4.43.0
-datasets
+transformers>=4.43.0,<5
+datasets>=2.18,<5
 huggingface_hub
 accelerate
 tqdm
-numpy
 pyyaml
 sentencepiece
 safetensors
-
