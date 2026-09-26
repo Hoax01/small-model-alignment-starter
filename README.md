@@ -75,8 +75,8 @@ python scripts/make_alpaca_subset.py \
 
 The script writes:
 
-- `data/alpaca_eval/alpacaeval_200_seed42.json`
-- `data/alpaca_eval/alpacaeval_200_seed42_references.json`
+- `data/alpaca_eval/alpacaeval_300_seed42.json`
+- `data/alpaca_eval/alpacaeval_300_seed42_references.json`
 
 If GPT-4/GPT-style reference outputs are found in `alpaca_eval_all_outputs.json`, each subset row includes `reference_output`.
 
@@ -85,8 +85,8 @@ If GPT-4/GPT-style reference outputs are found in `alpaca_eval_all_outputs.json`
 ```bash
 python scripts/generate_alpaca.py \
   --model_name_or_path Qwen/Qwen2.5-0.5B \
-  --subset_path data/alpaca_eval/alpacaeval_200_seed42.json \
-  --output_path outputs/eval/base_alpacaeval_200.json \
+  --subset_path data/alpaca_eval/alpacaeval_300_seed42.json \
+  --output_path outputs/eval/base_alpacaeval_300.json \
   --generator_name qwen2.5-0.5b-base \
   --batch_size 8 \
   --max_new_tokens 512
@@ -104,8 +104,7 @@ python scripts/train_sft.py \
   --max_val_examples 200 \
   --per_device_batch_size 2 \
   --gradient_accumulation_steps 16 \
-  --eval_steps 50 \
-  --save_steps 100
+  --eval_steps 50
 ```
 
 Larger run:
@@ -128,8 +127,8 @@ Defaults use `HuggingFaceH4/ultrachat_200k`, split `train_sft` and `test_sft`. Y
 ```bash
 python scripts/generate_alpaca.py \
   --model_name_or_path outputs/sft-qwen-0.5b/best \
-  --subset_path data/alpaca_eval/alpacaeval_200_seed42.json \
-  --output_path outputs/eval/sft_alpacaeval_200.json \
+  --subset_path data/alpaca_eval/alpacaeval_300_seed42.json \
+  --output_path outputs/eval/sft_alpacaeval_300.json \
   --generator_name qwen2.5-0.5b-sft \
   --batch_size 8 \
   --max_new_tokens 512
@@ -174,8 +173,8 @@ Defaults use `Anthropic/hh-rlhf`. You can pass local HH-style JSON/JSONL with `-
 ```bash
 python scripts/generate_alpaca.py \
   --model_name_or_path outputs/dpo-qwen-0.5b/best \
-  --subset_path data/alpaca_eval/alpacaeval_200_seed42.json \
-  --output_path outputs/eval/dpo_alpacaeval_200.json \
+  --subset_path data/alpaca_eval/alpacaeval_300_seed42.json \
+  --output_path outputs/eval/dpo_alpacaeval_300.json \
   --generator_name qwen2.5-0.5b-dpo \
   --batch_size 8 \
   --max_new_tokens 512
@@ -187,8 +186,8 @@ Compare DPO vs SFT:
 
 ```bash
 python scripts/build_pairwise_eval.py \
-  --a_outputs outputs/eval/dpo_alpacaeval_200.json \
-  --b_outputs outputs/eval/sft_alpacaeval_200.json \
+  --a_outputs outputs/eval/dpo_alpacaeval_300.json \
+  --b_outputs outputs/eval/sft_alpacaeval_300.json \
   --a_name dpo \
   --b_name sft \
   --output_path outputs/eval/dpo_vs_sft_pairs.jsonl
@@ -209,7 +208,7 @@ Compare a model against GPT-style reference outputs from the subset:
 
 ```bash
 python scripts/build_pairwise_eval.py \
-  --a_outputs outputs/eval/dpo_alpacaeval_200.json \
+  --a_outputs outputs/eval/dpo_alpacaeval_300.json \
   --b_from_reference \
   --a_name dpo \
   --b_name gpt_reference \
