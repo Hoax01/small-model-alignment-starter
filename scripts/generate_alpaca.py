@@ -72,17 +72,19 @@ def main() -> None:
         prompt_len = encoded.input_ids.shape[1]
         decoded = tokenizer.batch_decode(generated[:, prompt_len:], skip_special_tokens=True)
         for row, output in zip(batch_rows, decoded):
-            outputs.append(
-                {
-                    "id": row.get("id"),
-                    "instruction": row["instruction"],
-                    "output": output.strip(),
-                    "generator": args.generator_name,
-                    "dataset": row.get("dataset", "alpaca_eval"),
-                    "reference_output": row.get("reference_output"),
-                    "reference_generator": row.get("reference_generator"),
-                }
-            )
+            item = {
+                "id": row.get("id"),
+                "instruction": row["instruction"],
+                "output": output.strip(),
+                "generator": args.generator_name,
+                "dataset": row.get("dataset", "alpaca_eval"),
+                "reference_output": row.get("reference_output"),
+                "reference_generator": row.get("reference_generator"),
+            }
+            for metadata_key in ("category", "expected_behavior"):
+                if metadata_key in row:
+                    item[metadata_key] = row[metadata_key]
+            outputs.append(item)
     elapsed = time.time() - start
     write_json(args.output_path, outputs)
     print(f"Wrote {len(outputs)} generations to {args.output_path}")

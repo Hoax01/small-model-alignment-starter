@@ -46,21 +46,23 @@ def main() -> None:
         left_is_a = rng.random() < 0.5
         left = row if left_is_a else other
         right = other if left_is_a else row
-        pairs.append(
-            {
-                "id": key,
-                "instruction": row["instruction"],
-                "response_a": left["output"],
-                "response_b": right["output"],
-                "generator_a": args.a_name if left_is_a else args.b_name,
-                "generator_b": args.b_name if left_is_a else args.a_name,
-                "answer_key": "A" if left_is_a else "B",
-                "a_outputs_generator": args.a_name,
-                "b_outputs_generator": args.b_name,
-                "reference_output": row.get("reference_output"),
-                "reference_generator": row.get("reference_generator"),
-            }
-        )
+        pair = {
+            "id": key,
+            "instruction": row["instruction"],
+            "response_a": left["output"],
+            "response_b": right["output"],
+            "generator_a": args.a_name if left_is_a else args.b_name,
+            "generator_b": args.b_name if left_is_a else args.a_name,
+            "answer_key": "A" if left_is_a else "B",
+            "a_outputs_generator": args.a_name,
+            "b_outputs_generator": args.b_name,
+            "reference_output": row.get("reference_output"),
+            "reference_generator": row.get("reference_generator"),
+        }
+        for metadata_key in ("dataset", "category", "expected_behavior"):
+            if metadata_key in row:
+                pair[metadata_key] = row[metadata_key]
+        pairs.append(pair)
 
     write_jsonl(args.output_path, pairs)
     print(f"Wrote {len(pairs)} pairwise comparisons to {args.output_path}")

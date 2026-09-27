@@ -4,6 +4,7 @@ __pycache__/
 .venv/
 outputs/
 archive/
+analysis/
 data/
 wandb/
 *.log

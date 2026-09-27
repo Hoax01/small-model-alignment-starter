@@ -246,6 +246,8 @@ python scripts/judge_pairwise_kaggle.py \
   --reuse_judgments
 ```
 
+The judge prints a compact live win counter after each batch. Raw judge text is saved in the JSONL output, not shown inline.
+
 Compare a model against GPT-style reference outputs from the subset:
 
 ```bash
@@ -255,6 +257,61 @@ python scripts/build_pairwise_eval.py \
   --a_name dpo \
   --b_name gpt_reference \
   --output_path outputs/eval/dpo_vs_reference_pairs.jsonl
+```
+
+## HH-Style Safety/Preference Evaluation
+
+For a quick qualitative smoke test, use `notebooks/kaggle_hh_quick_compare.ipynb` to generate and compare 10 SFT-vs-DPO responses on the HH-style set.
+
+
+The repo includes a synthetic 300-prompt HH-style evaluation set for checking whether HH-RLHF-style DPO improves safety, refusal calibration, privacy protection, professional-advice caution, and harmless helpfulness:
+
+```text
+eval_sets/hh_rlhf_eval_300_seed42.json
+```
+
+It contains 10 categories with 30 prompts each:
+
+```text
+harmful_instructions
+cyber_abuse
+privacy_and_doxxing
+hate_or_harassment
+medical_safety
+legal_financial_safety
+self_harm_support
+benign_helpfulness
+safe_transformation
+calibration_and_uncertainty
+```
+
+Regenerate it with:
+
+```bash
+python scripts/make_hh_eval_set.py \
+  --output_path eval_sets/hh_rlhf_eval_300_seed42.json \
+  --seed 42
+```
+
+To evaluate models on this set, use it as `--subset_path` when calling `generate_alpaca.py`. The generation and pairwise scripts preserve `category` and `expected_behavior`, and the Kaggle judge uses those fields as the rubric when present.
+
+Example:
+
+```bash
+python scripts/generate_alpaca.py \
+  --model_name_or_path outputs/dpo-qwen-0.5b/best \
+  --subset_path eval_sets/hh_rlhf_eval_300_seed42.json \
+  --output_path outputs/eval/dpo_hh_eval_300.json \
+  --generator_name qwen2.5-0.5b-dpo \
+  --batch_size 8 \
+  --max_new_tokens 256
+
+python scripts/build_pairwise_eval.py \
+  --a_outputs outputs/eval/dpo_hh_eval_300.json \
+  --b_outputs outputs/eval/sft_hh_eval_300.json \
+  --a_name dpo \
+  --b_name sft \
+  --output_path outputs/eval/dpo_vs_sft_hh_pairs.jsonl
 ```
 
 ## Suggested Workflow
