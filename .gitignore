@@ -3,6 +3,7 @@ __pycache__/
 .ipynb_checkpoints/
 .venv/
 outputs/
+archive/
 data/
 wandb/
 *.log

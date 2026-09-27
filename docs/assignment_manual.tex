@@ -585,6 +585,8 @@ wait
 
 Your notebook may wrap this in Python with \texttt{subprocess.Popen}, then merge the two JSON files by prompt ID. The provided Kaggle generation notebook includes a helper for this pattern.
 
+The generation notebook should archive evaluation outputs using the convention \path{qwen_dpo_alignment_eval_outputs_<subset>_seed<seed>.zip}. For the default setting, this is \path{qwen_dpo_alignment_eval_outputs_300_seed42.zip}. The archive should contain an \texttt{eval/} directory so the evaluation notebook can resolve paths consistently.
+
 Build pairwise comparison files for:
 \begin{enumerate}[leftmargin=*]
   \item DPO versus SFT.

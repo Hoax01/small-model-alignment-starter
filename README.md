@@ -212,6 +212,14 @@ python scripts/generate_alpaca.py \
 wait
 ```
 
+The generation notebook also creates a standardized archive for moving outputs into a separate evaluation notebook:
+
+```text
+/kaggle/working/qwen_dpo_alignment_eval_outputs_300_seed42.zip
+```
+
+The zip contains an `eval/` directory. In the evaluation notebook, either attach this archive as a Kaggle dataset and let the notebook auto-detect it, or set `ATTACHED_EVAL_PATH` to the zip path.
+
 ## 7. Pairwise Evaluation
 
 Compare DPO vs SFT:
