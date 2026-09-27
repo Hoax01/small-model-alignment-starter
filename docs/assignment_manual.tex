@@ -4,29 +4,114 @@
 \usepackage{amsmath,amssymb}
 \usepackage{booktabs}
 \usepackage{enumitem}
+\usepackage[dvipsnames,table]{xcolor}
 \usepackage{hyperref}
-\usepackage{xcolor}
 \usepackage{listings}
 \usepackage{longtable}
 \usepackage{array}
+\usepackage{tabularx}
 \usepackage{titlesec}
+\usepackage[most]{tcolorbox}
+\usepackage{fancyhdr}
+\usepackage{microtype}
+\usepackage{pifont}
+
+\definecolor{DeepNavy}{HTML}{102A43}
+\definecolor{SignalBlue}{HTML}{2563EB}
+\definecolor{Teal}{HTML}{0F766E}
+\definecolor{Amber}{HTML}{B7791F}
+\definecolor{Rose}{HTML}{BE123C}
+\definecolor{SlateText}{HTML}{334155}
+\definecolor{MistBlue}{HTML}{EFF6FF}
+\definecolor{MistTeal}{HTML}{ECFDF5}
+\definecolor{MistAmber}{HTML}{FFFBEB}
+\definecolor{CodeBg}{HTML}{F8FAFC}
+\definecolor{CodeRule}{HTML}{CBD5E1}
 
 \hypersetup{
   colorlinks=true,
-  linkcolor=blue!60!black,
-  urlcolor=blue!60!black,
-  citecolor=blue!60!black
+  linkcolor=SignalBlue,
+  urlcolor=Teal,
+  citecolor=Rose
 }
+
+\titleformat{\section}
+  {\Large\bfseries\color{DeepNavy}}
+  {\thesection}
+  {0.75em}
+  {}
+\titleformat{\subsection}
+  {\large\bfseries\color{Teal}}
+  {\thesubsection}
+  {0.65em}
+  {}
+\titleformat{\subsubsection}
+  {\normalsize\bfseries\color{Amber}}
+  {\thesubsubsection}
+  {0.5em}
+  {}
+\titlespacing*{\section}{0pt}{2.8ex plus 1.0ex minus 0.2ex}{1.4ex}
+\titlespacing*{\subsection}{0pt}{2.0ex plus 0.8ex minus 0.2ex}{0.9ex}
+\setlist[enumerate]{leftmargin=*, itemsep=0.34em, topsep=0.55em, label=\arabic*.}
+\setlist[itemize]{leftmargin=*, itemsep=0.28em, topsep=0.5em, label=\textcolor{Teal}{\small$\blacktriangleright$}}
+\setlength{\parskip}{0.24em}
+
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{\textcolor{SlateText}{Small-Model Alignment}}
+\rhead{\textcolor{SlateText}{SFT + DPO}}
+\cfoot{\textcolor{SlateText}{\thepage}}
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\headrule}{\hbox to\headwidth{\color{SignalBlue!45}\leaders\hrule height \headrulewidth\hfill}}
+\setlength{\headheight}{14pt}
+\emergencystretch=3em
 
 \lstdefinestyle{code}{
   basicstyle=\ttfamily\small,
   breaklines=true,
   frame=single,
+  rulecolor=\color{CodeRule},
+  backgroundcolor=\color{CodeBg},
   columns=fullflexible,
   keepspaces=true,
-  showstringspaces=false
+  showstringspaces=false,
+  keywordstyle=\color{SignalBlue}\bfseries,
+  commentstyle=\color{Teal!75!black},
+  stringstyle=\color{Rose!85!black}
 }
 \lstset{style=code}
+
+\tcbset{
+  enhanced,
+  boxrule=0.6pt,
+  arc=2mm,
+  left=1.2em,
+  right=1.2em,
+  top=0.9em,
+  bottom=0.9em,
+  fonttitle=\bfseries
+}
+\newtcolorbox{infobox}[1]{
+  title=#1,
+  colback=MistBlue,
+  colframe=SignalBlue!70!black,
+  coltitle=white,
+  colbacktitle=SignalBlue!85!black
+}
+\newtcolorbox{deliverablebox}[1]{
+  title=#1,
+  colback=MistTeal,
+  colframe=Teal!70!black,
+  coltitle=white,
+  colbacktitle=Teal!85!black
+}
+\newtcolorbox{warningbox}[1]{
+  title=#1,
+  colback=MistAmber,
+  colframe=Amber!80!black,
+  coltitle=white,
+  colbacktitle=Amber!85!black
+}
 
 \title{Assignment: Instruction Tuning and Direct Preference Optimization on a Small Language Model}
 \author{Course Staff}
@@ -35,6 +120,9 @@
 \newcommand{\modelname}{\texttt{Qwen/Qwen2.5-0.5B}}
 \newcommand{\alpaca}{\textsc{AlpacaEval}}
 \newcommand{\hh}{Anthropic Helpful--Harmless}
+\newcommand{\resource}[2]{\href{#2}{\textcolor{Teal}{#1}}}
+\newcommand{\tablebullet}{\textcolor{SignalBlue}{\large$\ast$}}
+\newcommand{\checkmarkicon}{\textcolor{Teal}{\ding{51}}}
 
 \begin{document}
 \maketitle
@@ -48,14 +136,22 @@ This assignment introduces the post-training pipeline used to turn a pretrained 
 
 \section{Learning Objectives}
 By the end of this assignment, you should be able to:
-\begin{enumerate}[leftmargin=*]
-  \item Explain the distinction between pretraining, supervised fine-tuning, RLHF, and DPO.
-  \item Implement a response-masked supervised fine-tuning loop for a causal language model.
-  \item Implement the DPO loss from pairwise preference data without using TRL's \texttt{DPOTrainer}.
-  \item Train a small language model under realistic GPU and disk constraints.
-  \item Design and run an evaluation pipeline based on fixed prompts, saved generations, and pairwise model judgments.
-  \item Analyze alignment results critically, including failure cases, noisy judgments, and possible alignment tax.
-\end{enumerate}
+\begin{center}
+\renewcommand{\arraystretch}{1.22}
+\begin{tabularx}{\textwidth}{>{\centering\arraybackslash}p{0.08\textwidth} X}
+\rowcolor{MistBlue}
+ & Objective \\
+\checkmarkicon & Explain the distinction between pretraining, supervised fine-tuning, RLHF, and DPO. \\
+\rowcolor{MistTeal}
+\checkmarkicon & Implement a response-masked supervised fine-tuning loop for a causal language model. \\
+\checkmarkicon & Implement the DPO loss from pairwise preference data without using TRL's \texttt{DPOTrainer}. \\
+\rowcolor{MistTeal}
+\checkmarkicon & Train a small language model under realistic GPU and disk constraints. \\
+\checkmarkicon & Design and run an evaluation pipeline based on fixed prompts, saved generations, and pairwise model judgments. \\
+\rowcolor{MistTeal}
+\checkmarkicon & Analyze alignment results critically, including failure cases, noisy judgments, and possible alignment tax. \\
+\end{tabularx}
+\end{center}
 
 \section{High-Level Background}
 
@@ -118,7 +214,9 @@ Equivalently,
 \right).
 \end{equation}
 
+\begin{infobox}{DPO in One Sentence}
 DPO does not require training an explicit reward model and does not require online sampling during training. It only requires computing conditional log probabilities for chosen and rejected responses.
+\end{infobox}
 
 \section{What You Will Build}
 You will build a complete small-model alignment pipeline:
@@ -134,7 +232,9 @@ You will build a complete small-model alignment pipeline:
   \item Submit a complete written report.
 \end{enumerate}
 
-You may use Hugging Face Transformers to load models and tokenizers. You may use PyTorch utilities such as \texttt{DataLoader}, optimizers, schedulers, and AMP. For the main SFT and DPO implementation, you may \textbf{not} use Hugging Face \texttt{Trainer}, TRL \texttt{DPOTrainer}, or a prebuilt DPO training loop.
+\begin{warningbox}{Library Boundary}
+You may use \resource{Hugging Face Transformers}{https://huggingface.co/docs/transformers/index} to load models and tokenizers. You may use PyTorch utilities such as \texttt{DataLoader}, optimizers, schedulers, and AMP. For the main SFT and DPO implementation, you may \textbf{not} use Hugging Face \texttt{Trainer}, \resource{TRL}{https://huggingface.co/docs/trl/index} \texttt{DPOTrainer}, or a prebuilt DPO training loop.
+\end{warningbox}
 
 \section{Automated Checker Interface}
 You may organize your code however you like, but your repository must include a file named \texttt{submission\_adapter.py} at the repository root. The checker imports this file and calls a small fixed API. Each adapter function should call into your own SFT and DPO implementation.
@@ -347,29 +447,29 @@ Do not save frequent full intermediate checkpoints on Kaggle unless you have eno
 
 \subsection{Suggested Hyperparameters}
 \begin{center}
-\begin{tabular}{ll}
-\toprule
+\renewcommand{\arraystretch}{1.16}
+\begin{tabularx}{0.88\textwidth}{>{\bfseries\color{DeepNavy}}p{0.42\textwidth} X}
+\rowcolor{MistBlue}
 Hyperparameter & Value \\
-\midrule
 Model & \modelname{} \\
-Context length & 512 \\
+\rowcolor{MistTeal} Context length & 512 \\
 Train examples & 30,000 \\
-Validation examples & 1,000 \\
+\rowcolor{MistTeal} Validation examples & 1,000 \\
 Per-device batch size & 2 \\
-Gradient accumulation & 16 \\
+\rowcolor{MistTeal} Gradient accumulation & 16 \\
 Effective batch size & 32 \\
-Learning rate & $2\times 10^{-5}$ \\
+\rowcolor{MistAmber} Learning rate & $2\times 10^{-5}$ \\
 Warmup & 3\% \\
-Schedule & cosine decay \\
+\rowcolor{MistAmber} Schedule & cosine decay \\
 Weight decay & 0.1 \\
-Gradient clipping & 1.0 \\
+\rowcolor{MistTeal} Gradient clipping & 1.0 \\
 Epochs & 1 \\
-\bottomrule
-\end{tabular}
+\end{tabularx}
 \end{center}
 
-\paragraph{Deliverables.}
+\begin{deliverablebox}{SFT Deliverables}
 Submit SFT training logs, final validation loss, runtime, checkpoint path, and a brief discussion of qualitative changes from the base model.
+\end{deliverablebox}
 
 \section{Task 4: DPO From Scratch}
 
@@ -384,28 +484,29 @@ Implement DPO yourself. Your implementation should include:
   \item Saving the best checkpoint according to validation reward accuracy.
 \end{enumerate}
 
+\begin{warningbox}{Kaggle Memory Tip}
 A memory-friendly setup on Kaggle T4x2 is to place the policy on \texttt{cuda:0} and the frozen reference on \texttt{cuda:1}. The trainable policy should remain in fp32 when using gradient scaling; the frozen reference may be loaded in fp16.
+\end{warningbox}
 
 \subsection{Suggested Hyperparameters}
 \begin{center}
-\begin{tabular}{ll}
-\toprule
+\renewcommand{\arraystretch}{1.16}
+\begin{tabularx}{0.88\textwidth}{>{\bfseries\color{DeepNavy}}p{0.42\textwidth} X}
+\rowcolor{MistBlue}
 Hyperparameter & Value \\
-\midrule
 Initial policy & SFT checkpoint \\
-Reference model & frozen SFT checkpoint \\
+\rowcolor{MistTeal} Reference model & frozen SFT checkpoint \\
 Train pairs & 15,000 \\
-Validation pairs & 1,000 \\
+\rowcolor{MistTeal} Validation pairs & 1,000 \\
 Context length & 512 \\
-Per-device batch size & 1 \\
+\rowcolor{MistTeal} Per-device batch size & 1 \\
 Gradient accumulation & 32 \\
-Effective batch size & 32 \\
-Learning rate & $1\times 10^{-6}$ \\
+\rowcolor{MistTeal} Effective batch size & 32 \\
+\rowcolor{MistAmber} Learning rate & $1\times 10^{-6}$ \\
 $\beta$ & 0.1 \\
-Optimizer & RMSprop or AdamW \\
+\rowcolor{MistAmber} Optimizer & RMSprop or AdamW \\
 Epochs & 1 \\
-\bottomrule
-\end{tabular}
+\end{tabularx}
 \end{center}
 
 \subsection{Metrics}
@@ -425,8 +526,9 @@ Reward margin is the mean value of
 \end{equation}
 A reward accuracy near 0.5 with margin near 0 suggests little preference signal. Higher reward accuracy with a positive margin suggests the policy is learning to prefer chosen responses.
 
-\paragraph{Deliverables.}
+\begin{deliverablebox}{DPO Deliverables}
 Submit DPO training logs, validation DPO loss, reward accuracy, reward margin, checkpoint path, and a short discussion of training stability.
+\end{deliverablebox}
 
 \section{Task 5: Generate Evaluation Outputs}
 Generate responses on the same \alpaca{} subset for:
@@ -516,7 +618,9 @@ Total & 4.5--5.5 hours \\
 \bottomrule
 \end{tabular}
 \end{center}
-Budget a six-hour Kaggle session to be safe.
+\begin{warningbox}{Runtime Planning}
+Budget a six-hour Kaggle session to be safe. Save notebook versions and archive important outputs as soon as a stage completes.
+\end{warningbox}
 
 \section{Submission Checklist}
 Submit:
@@ -535,8 +639,9 @@ Submit:
 
 \section{Grading Rubric}
 \begin{center}
-\begin{tabular}{p{0.32\linewidth}p{0.55\linewidth}r}
-\toprule
+\renewcommand{\arraystretch}{1.18}
+\begin{tabularx}{\textwidth}{>{\bfseries\color{DeepNavy}}p{0.28\textwidth} X >{\bfseries}r}
+\rowcolor{MistBlue}
 Category & Criteria & Points \\
 \midrule
 Repository and reproducibility & Clear repo, documented setup, deterministic subsets, runnable Kaggle workflow & 10 \\
@@ -546,9 +651,9 @@ Evaluation pipeline & Saved generations, pairwise files, Kaggle model judging, s
 Report quality & Clear explanation, quantitative results, qualitative analysis, limitations & 20 \\
 Engineering hygiene & Disk-aware checkpointing, readable code, useful logs & 5 \\
 \midrule
+\rowcolor{MistTeal}
 Total & & 100 \\
-\bottomrule
-\end{tabular}
+\end{tabularx}
 \end{center}
 
 \section{Academic Integrity and Collaboration}
@@ -586,13 +691,13 @@ The dataset is stylistic, but the model should still remain useful. A good respo
 \end{enumerate}
 
 \subsection{Training Method}
-Use TRL's \texttt{DPOTrainer} rather than your own DPO loop. Use PEFT/LoRA so that you train a small set of adapter weights rather than all model parameters.
+Use \resource{TRL's \texttt{DPOTrainer}}{https://huggingface.co/docs/trl/en/dpo_trainer} rather than your own DPO loop. Use \resource{PEFT/LoRA}{https://huggingface.co/docs/peft/index} so that you train a small set of adapter weights rather than all model parameters.
 
 Your implementation should include:
 \begin{enumerate}[leftmargin=*]
   \item loading the SmolLM 350M Instruct model and tokenizer;
   \item formatting the preference dataset for TRL;
-  \item configuring LoRA with PEFT;
+  \item configuring LoRA with \resource{PEFT}{https://huggingface.co/docs/peft/index};
   \item training with \texttt{DPOTrainer};
   \item saving the LoRA adapter and tokenizer;
   \item generating samples before and after DPO;
@@ -604,18 +709,17 @@ Unlike the main DPO task, this extension permits TRL and PEFT. You should still 
 \subsection{Suggested LoRA Configuration}
 A reasonable starting point is:
 \begin{center}
-\begin{tabular}{ll}
-\toprule
+\renewcommand{\arraystretch}{1.16}
+\begin{tabularx}{0.9\textwidth}{>{\bfseries\color{DeepNavy}}p{0.34\textwidth} X}
+\rowcolor{MistBlue}
 Parameter & Suggested value \\
-\midrule
 LoRA rank $r$ & 8 or 16 \\
-LoRA alpha & 16 or 32 \\
+\rowcolor{MistTeal} LoRA alpha & 16 or 32 \\
 LoRA dropout & 0.05 \\
-Target modules & attention projection modules, or the model-specific common linear modules \\
+\rowcolor{MistAmber} Target modules & attention projection modules, or the model-specific common linear modules \\
 Precision & fp16 on T4 \\
-Max length & 512 \\
-\bottomrule
-\end{tabular}
+\rowcolor{MistTeal} Max length & 512 \\
+\end{tabularx}
 \end{center}
 You must verify the correct target module names for the SmolLM architecture you use. Do not assume that target module names from Llama, Mistral, or Qwen automatically apply.
 
@@ -623,16 +727,15 @@ You must verify the correct target module names for the SmolLM architecture you 
 Run a small sweep. The goal is not to exhaustively tune the model, but to observe how DPO and LoRA hyperparameters affect style, helpfulness, and stability.
 
 \begin{center}
-\begin{tabular}{ll}
-\toprule
+\renewcommand{\arraystretch}{1.16}
+\begin{tabularx}{0.9\textwidth}{>{\bfseries\color{DeepNavy}}p{0.34\textwidth} X}
+\rowcolor{MistBlue}
 Hyperparameter & Values \\
-\midrule
 Learning rate & $5\times10^{-7}$, $1\times10^{-6}$, $2\times10^{-6}$ \\
-$\beta$ & 0.05, 0.1, 0.2 \\
+\rowcolor{MistTeal} $\beta$ & 0.05, 0.1, 0.2 \\
 LoRA rank & 8, 16, 32 \\
-LoRA alpha & 16, 32 \\
-\bottomrule
-\end{tabular}
+\rowcolor{MistTeal} LoRA alpha & 16, 32 \\
+\end{tabularx}
 \end{center}
 
 You do not need to run every possible Cartesian product if compute is limited. Choose a principled subset, such as:
@@ -692,12 +795,47 @@ In your final discussion, compare this extension to your from-scratch DPO implem
   \item Did TRL hide any important details that you now understand because of the from-scratch implementation?
 \end{enumerate}
 
+\section{Resources}
+
+\begin{infobox}{Useful Links}
+\renewcommand{\arraystretch}{1.2}
+\begin{tabularx}{\textwidth}{X X}
+\begin{tabular}[t]{@{}l@{}}
+\textbf{\textcolor{DeepNavy}{Hugging Face}}\\[0.25em]
+\resource{Transformers docs}{https://huggingface.co/docs/transformers/index}\\
+\resource{Qwen2.5-0.5B model card}{https://huggingface.co/Qwen/Qwen2.5-0.5B}
+\end{tabular}
+&
+\begin{tabular}[t]{@{}l@{}}
+\textbf{\textcolor{DeepNavy}{Preference Optimization}}\\[0.25em]
+\resource{DPO paper}{https://arxiv.org/abs/2305.18290}\\
+\resource{TRL docs}{https://huggingface.co/docs/trl/index}\\
+\resource{DPOTrainer guide}{https://huggingface.co/docs/trl/en/dpo_trainer}
+\end{tabular}
+\\[1.0em]
+\begin{tabular}[t]{@{}l@{}}
+\textbf{\textcolor{DeepNavy}{PEFT / LoRA}}\\[0.25em]
+\resource{PEFT docs}{https://huggingface.co/docs/peft/index}
+\end{tabular}
+&
+\begin{tabular}[t]{@{}l@{}}
+\textbf{\textcolor{DeepNavy}{Kaggle}}\\[0.25em]
+\resource{Notebooks docs}{https://www.kaggle.com/docs/notebooks}\\
+\resource{Models docs}{https://www.kaggle.com/docs/models}\\
+\resource{GPU usage}{https://www.kaggle.com/docs/efficient-gpu-usage}
+\end{tabular}
+\end{tabularx}
+\end{infobox}
+
+
 \section*{References}
 \begin{enumerate}[leftmargin=*]
-  \item Rafailov, R., Sharma, A., Mitchell, E., Ermon, S., Manning, C. D., and Finn, C. Direct Preference Optimization: Your Language Model is Secretly a Reward Model. NeurIPS, 2023.
-  \item Ouyang, L. et al. Training language models to follow instructions with human feedback. NeurIPS, 2022.
-  \item Li, X. et al. AlpacaEval: An Automatic Evaluator of Instruction-following Models. 2023.
-  \item Bai, Y. et al. Training a Helpful and Harmless Assistant with Reinforcement Learning from Human Feedback. 2022.
+  \item Rafailov, R., Sharma, A., Mitchell, E., Ermon, S., Manning, C. D., and Finn, C. \resource{Direct Preference Optimization: Your Language Model is Secretly a Reward Model}{https://arxiv.org/abs/2305.18290}. NeurIPS, 2023.
+  \item Ouyang, L. et al. \resource{Training language models to follow instructions with human feedback}{https://arxiv.org/abs/2203.02155}. NeurIPS, 2022.
+  \item Li, X. et al. \resource{AlpacaEval: An Automatic Evaluator of Instruction-following Models}{https://arxiv.org/abs/2305.14387}. 2023.
+  \item Bai, Y. et al. \resource{Training a Helpful and Harmless Assistant with Reinforcement Learning from Human Feedback}{https://arxiv.org/abs/2204.05862}. 2022.
+  \item Hugging Face. \resource{Transformers documentation}{https://huggingface.co/docs/transformers/index}, \resource{TRL documentation}{https://huggingface.co/docs/trl/index}, and \resource{PEFT documentation}{https://huggingface.co/docs/peft/index}.
+  \item Kaggle. \resource{Notebooks documentation}{https://www.kaggle.com/docs/notebooks}, \resource{Models documentation}{https://www.kaggle.com/docs/models}, and \resource{efficient GPU usage guide}{https://www.kaggle.com/docs/efficient-gpu-usage}.
 \end{enumerate}
 
 \end{document}
