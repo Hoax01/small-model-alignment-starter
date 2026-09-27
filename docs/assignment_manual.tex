@@ -1,0 +1,703 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{titlesec}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue!60!black,
+  urlcolor=blue!60!black,
+  citecolor=blue!60!black
+}
+
+\lstdefinestyle{code}{
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  frame=single,
+  columns=fullflexible,
+  keepspaces=true,
+  showstringspaces=false
+}
+\lstset{style=code}
+
+\title{Assignment: Instruction Tuning and Direct Preference Optimization on a Small Language Model}
+\author{Course Staff}
+\date{}
+
+\newcommand{\modelname}{\texttt{Qwen/Qwen2.5-0.5B}}
+\newcommand{\alpaca}{\textsc{AlpacaEval}}
+\newcommand{\hh}{Anthropic Helpful--Harmless}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This assignment introduces the post-training pipeline used to turn a pretrained language model into a more useful assistant. You will work with a small pretrained model, \modelname, and train it in two stages: supervised fine-tuning (SFT) on instruction-response demonstrations, followed by Direct Preference Optimization (DPO) on pairwise preference data. You will implement the main SFT and DPO training components yourself, run the experiments on Kaggle T4 GPUs, generate responses on a fixed \alpaca{} subset, and evaluate model behavior using pairwise judgments from Kaggle model APIs. The goal is not to produce a state-of-the-art assistant, but to understand the mechanics, tradeoffs, and evaluation challenges of modern LLM alignment.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+\section{Learning Objectives}
+By the end of this assignment, you should be able to:
+\begin{enumerate}[leftmargin=*]
+  \item Explain the distinction between pretraining, supervised fine-tuning, RLHF, and DPO.
+  \item Implement a response-masked supervised fine-tuning loop for a causal language model.
+  \item Implement the DPO loss from pairwise preference data without using TRL's \texttt{DPOTrainer}.
+  \item Train a small language model under realistic GPU and disk constraints.
+  \item Design and run an evaluation pipeline based on fixed prompts, saved generations, and pairwise model judgments.
+  \item Analyze alignment results critically, including failure cases, noisy judgments, and possible alignment tax.
+\end{enumerate}
+
+\section{High-Level Background}
+
+\subsection{Pretraining}
+Modern language models are first trained with a self-supervised next-token prediction objective. Given a sequence of tokens $x_1,\ldots,x_T$, the model learns to maximize
+\begin{equation}
+  \sum_{t=1}^{T} \log p_\theta(x_t \mid x_{<t}).
+\end{equation}
+This stage teaches the model broad linguistic, factual, and reasoning patterns from large text corpora. However, a pretrained base model is not necessarily a good assistant. It may continue text, imitate undesired formats, fail to follow instructions reliably, or produce unsafe content.
+
+In this assignment, you will \emph{not} pretrain a model. You will start from a pretrained base model, \modelname, and study post-training.
+
+\subsection{Supervised Fine-Tuning}
+Supervised fine-tuning (SFT), also called instruction tuning, trains the model on examples of the form:
+\begin{center}
+\texttt{instruction} $\rightarrow$ \texttt{response}.
+\end{center}
+The model is trained with teacher forcing to assign high probability to the target response. A key implementation detail is that the loss should usually be applied only to response tokens, not to the prompt tokens. If $x$ is the instruction prompt and $y$ is the target response, the SFT objective is
+\begin{equation}
+  \mathcal{L}_{\text{SFT}}(\theta) = - \log \pi_\theta(y \mid x).
+\end{equation}
+SFT teaches a base model to follow an instruction-response format and to imitate high-quality demonstrations.
+
+\subsection{RLHF}
+Reinforcement Learning from Human Feedback (RLHF) typically involves three stages:
+\begin{enumerate}[leftmargin=*]
+  \item Train an SFT model from demonstrations.
+  \item Train a reward model from pairwise human preferences.
+  \item Optimize the language model policy against the reward model, often using PPO with a KL penalty.
+\end{enumerate}
+RLHF is powerful but complex. It requires reward modeling, online sampling, reinforcement learning machinery, and careful stabilization.
+
+You will \emph{not} implement PPO or full RLHF in this assignment. Instead, you will implement DPO, a simpler preference-learning method.
+
+\subsection{Direct Preference Optimization}
+DPO uses pairwise preference data directly. Each example contains an instruction $x$, a preferred response $y_w$, and a rejected response $y_l$. DPO compares the trainable policy $\pi_\theta$ with a frozen reference model $\pi_{\mathrm{ref}}$, usually the SFT model.
+
+The per-example DPO loss is
+\begin{equation}
+\mathcal{L}_{\text{DPO}}
+= -\log \sigma \left(
+\beta \left[
+\log \frac{\pi_\theta(y_w \mid x)}{\pi_{\mathrm{ref}}(y_w \mid x)}
+-
+\log \frac{\pi_\theta(y_l \mid x)}{\pi_{\mathrm{ref}}(y_l \mid x)}
+\right]
+\right),
+\end{equation}
+where $\beta$ controls how strongly the policy is allowed to move away from the reference model.
+
+Equivalently,
+\begin{equation}
+\mathcal{L}_{\text{DPO}}
+= -\log \sigma \left(
+\beta \left[
+(\log \pi_\theta(y_w \mid x) - \log \pi_\theta(y_l \mid x))
+-
+(\log \pi_{\mathrm{ref}}(y_w \mid x) - \log \pi_{\mathrm{ref}}(y_l \mid x))
+\right]
+\right).
+\end{equation}
+
+DPO does not require training an explicit reward model and does not require online sampling during training. It only requires computing conditional log probabilities for chosen and rejected responses.
+
+\section{What You Will Build}
+You will build a complete small-model alignment pipeline:
+\begin{enumerate}[leftmargin=*]
+  \item Create a reproducible GitHub repository.
+  \item Set up Kaggle notebooks using T4 GPUs.
+  \item Generate baseline responses from \modelname{} on an \alpaca{} subset.
+  \item Implement and run SFT.
+  \item Implement and run DPO from scratch.
+  \item Generate outputs from the base, SFT, and DPO models.
+  \item Build pairwise comparison files.
+  \item Evaluate using Kaggle model-based pairwise judgments.
+  \item Submit a complete written report.
+\end{enumerate}
+
+You may use Hugging Face Transformers to load models and tokenizers. You may use PyTorch utilities such as \texttt{DataLoader}, optimizers, schedulers, and AMP. For the main SFT and DPO implementation, you may \textbf{not} use Hugging Face \texttt{Trainer}, TRL \texttt{DPOTrainer}, or a prebuilt DPO training loop.
+
+\section{Automated Checker Interface}
+You may organize your code however you like, but your repository must include a file named \texttt{submission\_adapter.py} at the repository root. The checker imports this file and calls a small fixed API. Each adapter function should call into your own SFT and DPO implementation.
+
+\begin{lstlisting}[language=Python]
+def build_sft_batch(tokenizer, prompts, responses, max_length): ...
+
+def compute_response_logprobs(model, tokenizer, prompts, responses, max_length): ...
+
+def compute_sft_loss(model, tokenizer, prompts, responses, max_length): ...
+
+def compute_dpo_loss(
+    policy_model,
+    reference_model,
+    tokenizer,
+    prompts,
+    chosen_responses,
+    rejected_responses,
+    beta,
+    max_length,
+): ...
+\end{lstlisting}
+
+The adapter exists so that you are free to choose your own internal structure while the checker can still test the important behavior. The checker will use a tiny toy tokenizer and toy causal language model, not \modelname{}, so the tests run quickly and focus on correctness.
+
+Your adapter must satisfy the following contract:
+\begin{itemize}[leftmargin=*]
+  \item Preserve the input row order in all returned tensors and vectors.
+  \item Compute losses and log probabilities over response tokens only.
+  \item Include an EOS token in the response when the tokenizer provides one.
+  \item Mask prompt tokens and padding tokens with \texttt{-100} for SFT labels.
+  \item Return scalar mean losses for SFT and DPO.
+  \item Keep the DPO reference model frozen; reference-model computations should not produce gradients.
+\end{itemize}
+
+You can run the public checker locally with:
+\begin{lstlisting}[language=bash]
+python -m pip install -r autograder/requirements.txt
+PYTHONPATH=. pytest tests/test_adapter_correctness.py
+\end{lstlisting}
+
+\section{Compute Environment}
+
+\subsection{Kaggle Accelerator}
+Use a Kaggle notebook with the \texttt{GPU T4 x2} accelerator. You should verify that two GPUs are visible:
+\begin{lstlisting}[language=bash]
+nvidia-smi
+\end{lstlisting}
+A typical output should show two Tesla T4 GPUs with roughly 15 GiB of memory each.
+
+\subsection{Dependency Guidance}
+Kaggle already includes a CUDA-compatible PyTorch build. Do not reinstall PyTorch unless you have a specific reason. A safe install pattern is:
+\begin{lstlisting}[language=bash]
+python -m pip install -q "transformers>=4.43.0,<5" "datasets>=2.18,<5" \
+  huggingface_hub accelerate tqdm pyyaml sentencepiece safetensors
+python -m pip install -q -e . --no-deps
+\end{lstlisting}
+
+Your repository should include a minimal \texttt{requirements.txt} and \texttt{pyproject.toml}. The requirements should not pin \texttt{torch}. A suitable \texttt{requirements.txt} is:
+\begin{lstlisting}
+transformers>=4.43.0,<5
+datasets>=2.18,<5
+huggingface_hub
+accelerate
+tqdm
+pyyaml
+sentencepiece
+safetensors
+\end{lstlisting}
+
+\subsection{Recommended Repository Layout}
+You should create a GitHub repository with a clear structure. One possible layout is:
+\begin{lstlisting}
+qwen-dpo-alignment/
+  requirements.txt
+  pyproject.toml
+  README.md
+  src/
+    your_package/
+      data.py
+      modeling.py
+      prompts.py
+      utils.py
+  scripts/
+    train_sft.py
+    train_dpo.py
+    generate_alpaca.py
+    make_alpaca_subset.py
+    build_pairwise_eval.py
+    judge_pairwise_kaggle.py
+  notebooks/
+    kaggle_train_only.ipynb
+    kaggle_generate_outputs.ipynb
+    kaggle_eval_only.ipynb
+\end{lstlisting}
+You may choose a different structure, but your code must be reproducible and documented.
+
+\subsection{Kaggle Workflow}
+A practical workflow is:
+\begin{enumerate}[leftmargin=*]
+  \item Develop and push your code to GitHub.
+  \item Clone the repository in Kaggle.
+  \item Run training in one notebook.
+  \item Save the Kaggle notebook version so that outputs are preserved.
+  \item Attach the training notebook outputs as an input dataset to a separate generation notebook.
+  \item Attach generation outputs as an input dataset to a separate evaluation notebook.
+\end{enumerate}
+This separation avoids rerunning expensive training when debugging evaluation.
+
+\section{Model and Data}
+
+\subsection{Model}
+Use \modelname{} as the base model. This model is small enough to train on Kaggle T4 GPUs, while still being large enough to show meaningful differences between base, SFT, and DPO behavior.
+
+\subsection{SFT Data}
+Use an instruction-response dataset such as UltraChat-style data. Each example should be converted into a single-turn instruction and response.
+
+Recommended run size:
+\begin{center}
+\begin{tabular}{lrr}
+\toprule
+Split & Examples & Purpose \\
+\midrule
+Train & 30,000 & SFT optimization \\
+Validation & 1,000 & validation loss \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Preference Data}
+Use pairwise preference data such as the \hh{} dataset. Each example should contain:
+\begin{center}
+\texttt{instruction}, \texttt{chosen}, \texttt{rejected}.
+\end{center}
+You should filter out multi-turn examples if your preprocessing assumes single-turn prompts.
+
+Recommended run size:
+\begin{center}
+\begin{tabular}{lrr}
+\toprule
+Split & Pairs & Purpose \\
+\midrule
+Train & 15,000 & DPO optimization \\
+Validation & 1,000 & reward accuracy and margin \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Evaluation Prompts}
+Use a fixed \alpaca{} subset with a deterministic seed. Recommended size:
+\begin{center}
+\begin{tabular}{lr}
+\toprule
+Subset & Prompts \\
+\midrule
+Default & 300 \\
+Larger optional run & 500 \\
+\bottomrule
+\end{tabular}
+\end{center}
+Save the exact subset used for all models.
+
+\section{Task 1: Repository and Kaggle Setup}
+Create a GitHub repository and a Kaggle notebook workflow. Your setup should:
+\begin{enumerate}[leftmargin=*]
+  \item Clone your repository in Kaggle.
+  \item Install dependencies without reinstalling PyTorch.
+  \item Confirm that two T4 GPUs are available.
+  \item Print package versions for PyTorch, Transformers, and Datasets.
+\end{enumerate}
+
+\paragraph{Deliverables.}
+Submit your GitHub URL, Kaggle setup logs, and a short note describing your environment.
+
+\section{Task 2: Baseline Generation}
+Create a fixed \alpaca{} subset and generate baseline responses from \modelname{}.
+
+Your generation script should save a JSON file with entries containing at least:
+\begin{lstlisting}
+{
+  "id": "...",
+  "instruction": "...",
+  "output": "...",
+  "generator": "qwen2.5-0.5b-base",
+  "dataset": "alpaca_eval"
+}
+\end{lstlisting}
+
+Use greedy decoding for the main comparison unless you justify another choice.
+
+\paragraph{Deliverables.}
+Submit the subset file, baseline generation file, generation throughput, and five qualitative examples.
+
+\section{Task 3: Supervised Fine-Tuning}
+
+\subsection{Implementation Requirements}
+Implement your own SFT training loop. Your implementation should include:
+\begin{enumerate}[leftmargin=*]
+  \item Prompt formatting for instruction-response examples.
+  \item Response-only loss masking.
+  \item Padding and attention masks.
+  \item Gradient accumulation.
+  \item Mixed precision using fp16 autocast on T4 GPUs.
+  \item FP32 trainable weights when using gradient scaling.
+  \item Gradient clipping.
+  \item Validation loss.
+  \item Saving \texttt{best} and \texttt{final} checkpoints.
+\end{enumerate}
+Do not save frequent full intermediate checkpoints on Kaggle unless you have enough disk space. Saving only \texttt{best} and \texttt{final} is sufficient.
+
+\subsection{Suggested Hyperparameters}
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+Hyperparameter & Value \\
+\midrule
+Model & \modelname{} \\
+Context length & 512 \\
+Train examples & 30,000 \\
+Validation examples & 1,000 \\
+Per-device batch size & 2 \\
+Gradient accumulation & 16 \\
+Effective batch size & 32 \\
+Learning rate & $2\times 10^{-5}$ \\
+Warmup & 3\% \\
+Schedule & cosine decay \\
+Weight decay & 0.1 \\
+Gradient clipping & 1.0 \\
+Epochs & 1 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\paragraph{Deliverables.}
+Submit SFT training logs, final validation loss, runtime, checkpoint path, and a brief discussion of qualitative changes from the base model.
+
+\section{Task 4: DPO From Scratch}
+
+\subsection{Implementation Requirements}
+Implement DPO yourself. Your implementation should include:
+\begin{enumerate}[leftmargin=*]
+  \item Loading the SFT model as the trainable policy.
+  \item Loading a frozen copy of the SFT model as the reference model.
+  \item Computing response-only log probabilities for chosen and rejected responses.
+  \item Computing the DPO loss.
+  \item Tracking validation DPO loss, reward accuracy, and reward margin.
+  \item Saving the best checkpoint according to validation reward accuracy.
+\end{enumerate}
+
+A memory-friendly setup on Kaggle T4x2 is to place the policy on \texttt{cuda:0} and the frozen reference on \texttt{cuda:1}. The trainable policy should remain in fp32 when using gradient scaling; the frozen reference may be loaded in fp16.
+
+\subsection{Suggested Hyperparameters}
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+Hyperparameter & Value \\
+\midrule
+Initial policy & SFT checkpoint \\
+Reference model & frozen SFT checkpoint \\
+Train pairs & 15,000 \\
+Validation pairs & 1,000 \\
+Context length & 512 \\
+Per-device batch size & 1 \\
+Gradient accumulation & 32 \\
+Effective batch size & 32 \\
+Learning rate & $1\times 10^{-6}$ \\
+$\beta$ & 0.1 \\
+Optimizer & RMSprop or AdamW \\
+Epochs & 1 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Metrics}
+For each validation pair, define the implicit rewards:
+\begin{align}
+  r_w &= \beta \left(\log \pi_\theta(y_w \mid x) - \log \pi_{\mathrm{ref}}(y_w \mid x)\right), \\
+  r_l &= \beta \left(\log \pi_\theta(y_l \mid x) - \log \pi_{\mathrm{ref}}(y_l \mid x)\right).
+\end{align}
+
+Reward accuracy is the fraction of validation examples where
+\begin{equation}
+  r_w > r_l.
+\end{equation}
+Reward margin is the mean value of
+\begin{equation}
+  r_w - r_l.
+\end{equation}
+A reward accuracy near 0.5 with margin near 0 suggests little preference signal. Higher reward accuracy with a positive margin suggests the policy is learning to prefer chosen responses.
+
+\paragraph{Deliverables.}
+Submit DPO training logs, validation DPO loss, reward accuracy, reward margin, checkpoint path, and a short discussion of training stability.
+
+\section{Task 5: Generate Evaluation Outputs}
+Generate responses on the same \alpaca{} subset for:
+\begin{enumerate}[leftmargin=*]
+  \item Base model.
+  \item SFT model.
+  \item DPO model.
+\end{enumerate}
+Build pairwise comparison files for:
+\begin{enumerate}[leftmargin=*]
+  \item DPO versus SFT.
+  \item DPO versus base.
+  \item SFT versus base.
+  \item Optional: DPO versus GPT-style reference output, if available.
+\end{enumerate}
+Randomize response order in each pairwise file and preserve the mapping from response position to model identity.
+
+\paragraph{Deliverables.}
+Submit all generation JSON files and all pairwise JSONL files.
+
+\section{Task 6: Evaluation With Kaggle Models}
+Use Kaggle model access through \texttt{kaggle\_benchmarks} or an equivalent Kaggle-supported model interface. A suitable judge model is:
+\begin{center}
+\texttt{google/gemini-3.6-flash}
+\end{center}
+Your evaluator should:
+\begin{enumerate}[leftmargin=*]
+  \item Read saved pairwise JSONL files.
+  \item Judge in batches.
+  \item Checkpoint judgments after each batch.
+  \item Resume from existing judgments when possible.
+  \item Summarize win, loss, and tie rates.
+\end{enumerate}
+
+The judge should be instructed to compare responses based on helpfulness, correctness, instruction-following, concision when appropriate, formatting, and absence of hallucinations or unsafe content.
+
+\paragraph{Deliverables.}
+Submit judgment JSONL files, summary tables, and a brief discussion of judge reliability.
+
+\section{Task 7: Final Report}
+Your final report should be a complete technical document. It should include:
+\begin{enumerate}[leftmargin=*]
+  \item Introduction and motivation.
+  \item Compute environment and reproducibility details.
+  \item Dataset preprocessing details.
+  \item SFT method and results.
+  \item DPO method and results.
+  \item Evaluation setup.
+  \item Quantitative results.
+  \item Qualitative error analysis.
+  \item Limitations.
+  \item Lessons learned.
+\end{enumerate}
+
+\subsection{Required Tables}
+Include at least the following tables:
+\begin{enumerate}[leftmargin=*]
+  \item SFT training configuration and validation loss.
+  \item DPO training configuration, validation reward accuracy, and reward margin.
+  \item Generation throughput for base, SFT, and DPO.
+  \item Pairwise win/tie/loss rates.
+\end{enumerate}
+
+\subsection{Required Qualitative Analysis}
+Discuss examples where:
+\begin{enumerate}[leftmargin=*]
+  \item SFT improves over the base model.
+  \item DPO improves over SFT.
+  \item DPO is worse than SFT.
+  \item All models fail.
+  \item The judge's decision seems questionable.
+\end{enumerate}
+
+\section{Expected Runtime}
+For the recommended 30k SFT, 15k DPO, and 300-prompt evaluation setup, a rough estimate on Kaggle T4x2 is:
+\begin{center}
+\begin{tabular}{lr}
+\toprule
+Stage & Estimated time \\
+\midrule
+SFT training & 1.5 hours \\
+DPO training & 2.0--2.5 hours \\
+Generation & 0.5--1.0 hours \\
+Kaggle model judging & 0.3--0.5 hours \\
+\midrule
+Total & 4.5--5.5 hours \\
+\bottomrule
+\end{tabular}
+\end{center}
+Budget a six-hour Kaggle session to be safe.
+
+\section{Submission Checklist}
+Submit:
+\begin{enumerate}[leftmargin=*]
+  \item GitHub repository URL.
+  \item Training notebooks or scripts.
+  \item Root-level \texttt{submission\_adapter.py} for automated checks.
+  \item SFT checkpoint path or archive.
+  \item DPO checkpoint path or archive.
+  \item AlpacaEval subset file.
+  \item Base, SFT, and DPO generation files.
+  \item Pairwise comparison files.
+  \item Judgment files and summary tables.
+  \item Final report as PDF.
+\end{enumerate}
+
+\section{Grading Rubric}
+\begin{center}
+\begin{tabular}{p{0.32\linewidth}p{0.55\linewidth}r}
+\toprule
+Category & Criteria & Points \\
+\midrule
+Repository and reproducibility & Clear repo, documented setup, deterministic subsets, runnable Kaggle workflow & 10 \\
+SFT implementation & Correct response masking, training loop, validation, checkpointing, stable mixed precision & 20 \\
+DPO implementation & Correct log-probabilities, DPO loss, reference model handling, validation metrics & 25 \\
+Evaluation pipeline & Saved generations, pairwise files, Kaggle model judging, summaries & 20 \\
+Report quality & Clear explanation, quantitative results, qualitative analysis, limitations & 20 \\
+Engineering hygiene & Disk-aware checkpointing, readable code, useful logs & 5 \\
+\midrule
+Total & & 100 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{Academic Integrity and Collaboration}
+You may discuss concepts, debugging strategies, and experimental observations with classmates. Your implementation and report must be your own. If you use external references, cite them. Do not submit code copied from public DPO implementations as your own. You may consult documentation for PyTorch, Hugging Face Transformers, Kaggle, and the DPO paper.
+
+\section{Extension Task: The Idiot Sandwich --- TRL, PEFT, and Style Preference Tuning}
+
+This extension gives you a second route through preference optimization using higher-level alignment libraries. In the main assignment, you implement DPO yourself. In this extension, you will use TRL's \texttt{DPOTrainer} together with parameter-efficient fine-tuning (PEFT) to train a small instruction model on a curated stylistic preference dataset.
+
+The working title for this task is \emph{The Idiot Sandwich}. The dataset will contain preference pairs that nudge the model toward a Gordon Ramsay-inspired response style: direct, vivid, culinary, impatient, funny, and sharply critical when appropriate. The goal is not to create a model that is abusive or unsafe. The goal is to study how preference optimization can steer \emph{style} as well as helpfulness.
+
+\subsection{Model}
+Use an instruction-tuned SmolLM 350M model. The exact checkpoint will be specified with the dataset release. A typical choice will be a SmolLM 350M Instruct checkpoint from Hugging Face.
+
+This model is intentionally smaller than \modelname{} so that students can run multiple hyperparameter settings on Kaggle. Because the model is small, you should expect the style transfer to be visible but imperfect. Your report should discuss both successful style adoption and failure cases.
+
+\subsection{Dataset}
+You will be given a curated preference dataset with examples of the form:
+\begin{lstlisting}
+{
+  "prompt": "...",
+  "chosen": "...",
+  "rejected": "..."
+}
+\end{lstlisting}
+The preferred responses will generally be more aligned with the target persona. The rejected responses may be bland, generic, evasive, poorly formatted, or less stylistically faithful.
+
+The dataset is stylistic, but the model should still remain useful. A good response should:
+\begin{enumerate}[leftmargin=*]
+  \item answer the user's actual question;
+  \item preserve factual correctness;
+  \item use a Ramsay-inspired tone when appropriate;
+  \item avoid protected-class insults, threats, harassment, or unsafe content;
+  \item avoid becoming so performative that it stops being helpful.
+\end{enumerate}
+
+\subsection{Training Method}
+Use TRL's \texttt{DPOTrainer} rather than your own DPO loop. Use PEFT/LoRA so that you train a small set of adapter weights rather than all model parameters.
+
+Your implementation should include:
+\begin{enumerate}[leftmargin=*]
+  \item loading the SmolLM 350M Instruct model and tokenizer;
+  \item formatting the preference dataset for TRL;
+  \item configuring LoRA with PEFT;
+  \item training with \texttt{DPOTrainer};
+  \item saving the LoRA adapter and tokenizer;
+  \item generating samples before and after DPO;
+  \item evaluating whether the style changed without destroying usefulness.
+\end{enumerate}
+
+Unlike the main DPO task, this extension permits TRL and PEFT. You should still write clean, reproducible code and explain each configuration choice.
+
+\subsection{Suggested LoRA Configuration}
+A reasonable starting point is:
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+Parameter & Suggested value \\
+\midrule
+LoRA rank $r$ & 8 or 16 \\
+LoRA alpha & 16 or 32 \\
+LoRA dropout & 0.05 \\
+Target modules & attention projection modules, or the model-specific common linear modules \\
+Precision & fp16 on T4 \\
+Max length & 512 \\
+\bottomrule
+\end{tabular}
+\end{center}
+You must verify the correct target module names for the SmolLM architecture you use. Do not assume that target module names from Llama, Mistral, or Qwen automatically apply.
+
+\subsection{Hyperparameter Sweep}
+Run a small sweep. The goal is not to exhaustively tune the model, but to observe how DPO and LoRA hyperparameters affect style, helpfulness, and stability.
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+Hyperparameter & Values \\
+\midrule
+Learning rate & $5\times10^{-7}$, $1\times10^{-6}$, $2\times10^{-6}$ \\
+$\beta$ & 0.05, 0.1, 0.2 \\
+LoRA rank & 8, 16, 32 \\
+LoRA alpha & 16, 32 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+You do not need to run every possible Cartesian product if compute is limited. Choose a principled subset, such as:
+\begin{enumerate}[leftmargin=*]
+  \item one baseline configuration;
+  \item one lower-$\beta$ configuration;
+  \item one higher-$\beta$ configuration;
+  \item one larger-rank LoRA configuration.
+\end{enumerate}
+
+\subsection{Evaluation}
+Evaluate the base instruct model and your LoRA-DPO variants on a fixed prompt set. The prompt set should include:
+\begin{enumerate}[leftmargin=*]
+  \item cooking advice prompts;
+  \item general instruction-following prompts;
+  \item prompts where the Ramsay style is appropriate;
+  \item prompts where excessive harshness would be inappropriate;
+  \item safety-sensitive prompts where the model should remain responsible.
+\end{enumerate}
+
+For each model variant, generate responses and evaluate them along at least three axes:
+\begin{enumerate}[leftmargin=*]
+  \item \textbf{Helpfulness}: does the response answer the question?
+  \item \textbf{Style adherence}: does it sound like the intended persona?
+  \item \textbf{Safety and restraint}: does it avoid unacceptable insults, harassment, or unsafe guidance?
+\end{enumerate}
+
+You may use Kaggle model-based judging for pairwise comparisons. For example, compare:
+\begin{enumerate}[leftmargin=*]
+  \item base instruct model versus LoRA-DPO model;
+  \item low-$\beta$ versus high-$\beta$ variants;
+  \item low-rank versus high-rank LoRA variants.
+\end{enumerate}
+
+\subsection{Report Requirements for the Extension}
+Your extension report section should include:
+\begin{enumerate}[leftmargin=*]
+  \item model checkpoint used;
+  \item dataset size and preprocessing details;
+  \item LoRA configuration;
+  \item DPO hyperparameters;
+  \item sweep table;
+  \item training runtime and GPU memory observations;
+  \item qualitative samples before and after training;
+  \item analysis of whether the model became more stylistically faithful;
+  \item analysis of whether the model lost helpfulness or became too harsh;
+  \item your recommended configuration and why.
+\end{enumerate}
+
+\subsection{What to Compare Against the Main Assignment}
+In your final discussion, compare this extension to your from-scratch DPO implementation:
+\begin{enumerate}[leftmargin=*]
+  \item Which was easier to implement and debug?
+  \item Which was more memory efficient?
+  \item Which gave clearer metrics?
+  \item Did LoRA make experimentation easier?
+  \item Did TRL hide any important details that you now understand because of the from-scratch implementation?
+\end{enumerate}
+
+\section*{References}
+\begin{enumerate}[leftmargin=*]
+  \item Rafailov, R., Sharma, A., Mitchell, E., Ermon, S., Manning, C. D., and Finn, C. Direct Preference Optimization: Your Language Model is Secretly a Reward Model. NeurIPS, 2023.
+  \item Ouyang, L. et al. Training language models to follow instructions with human feedback. NeurIPS, 2022.
+  \item Li, X. et al. AlpacaEval: An Automatic Evaluator of Instruction-following Models. 2023.
+  \item Bai, Y. et al. Training a Helpful and Harmless Assistant with Reinforcement Learning from Human Feedback. 2022.
+\end{enumerate}
+
+\end{document}
