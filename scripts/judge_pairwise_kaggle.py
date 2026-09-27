@@ -5,6 +5,8 @@ import json
 import os
 import re
 import textwrap
+import time
+import traceback
 from collections import Counter
 from pathlib import Path
 from typing import Optional
@@ -18,6 +20,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output_path", required=True)
     parser.add_argument("--judge_model", default="google/gemini-3.6-flash")
     parser.add_argument("--batch_size", type=int, default=5)
+    parser.add_argument("--sleep_seconds", type=float, default=5.0, help="Seconds to sleep after each judge request attempt.")
+    parser.add_argument("--max_retries", type=int, default=3, help="Maximum attempts per batch in each pass.")
+    parser.add_argument("--failed_log_path", default=None, help="Optional JSONL path for failed judge attempts. Defaults to output_path + .failures.jsonl.")
     parser.add_argument("--reuse_judgments", action="store_true")
     return parser.parse_args()
 
@@ -242,17 +247,73 @@ def main() -> None:
     print(f"Loaded {len(accepted_cached)} cached judgments; judging {len(missing)} missing pairs.")
 
     usage = Counter()
-    for start in tqdm(range(0, len(missing), args.batch_size), desc="judging", unit="batch"):
+    failed_log_path = Path(args.failed_log_path) if args.failed_log_path else output_path.with_name(output_path.name + ".failures.jsonl")
+    failure_log: list[dict] = []
+
+    def log_failure(phase: str, batch_number: int, attempt: int, batch_rows: list[dict], exc: BaseException) -> None:
+        record = {
+            "phase": phase,
+            "batch_number": batch_number,
+            "attempt": attempt,
+            "pair_ids": [pair_key(row) for row in batch_rows],
+            "error_type": type(exc).__name__,
+            "error": str(exc),
+            "traceback": traceback.format_exc(),
+        }
+        failure_log.append(record)
+        append_jsonl(failed_log_path, [record])
+        print(
+            f"Judge failure phase={phase} batch={batch_number} attempt={attempt}/{args.max_retries}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+
+    def maybe_sleep() -> None:
+        if args.sleep_seconds > 0:
+            time.sleep(args.sleep_seconds)
+
+    def judge_with_retries(batch_rows: list[dict], phase: str, batch_number: int) -> bool:
+        for attempt in range(1, args.max_retries + 1):
+            try:
+                active_results.clear()
+                run = judge_batch.run(get_llm(), batch_rows)
+                usage.update(extract_usage(run))
+                judged_rows = list(active_results)
+                returned = {pair_key(row) for row in judged_rows}
+                expected = {pair_key(row) for row in batch_rows}
+                if returned != expected:
+                    raise RuntimeError(f"Judge returned keys {sorted(returned)}; expected {sorted(expected)}")
+                append_jsonl(output_path, judged_rows)
+                maybe_sleep()
+                return True
+            except Exception as exc:  # noqa: BLE001 - keep judging robust in Kaggle notebooks.
+                log_failure(phase, batch_number, attempt, batch_rows, exc)
+                maybe_sleep()
+        return False
+
+    failed_batches: list[list[dict]] = []
+    for batch_number, start in enumerate(
+        tqdm(range(0, len(missing), args.batch_size), desc="judging", unit="batch"),
+        start=1,
+    ):
         batch = missing[start : start + args.batch_size]
-        active_results.clear()
-        run = judge_batch.run(get_llm(), batch)
-        usage.update(extract_usage(run))
-        batch_rows = list(active_results)
-        returned = {pair_key(row) for row in batch_rows}
-        expected = {pair_key(row) for row in batch}
-        if returned != expected:
-            raise RuntimeError(f"Judge returned keys {sorted(returned)}; expected {sorted(expected)}")
-        append_jsonl(output_path, batch_rows)
+        if not judge_with_retries(batch, phase="initial", batch_number=batch_number):
+            failed_batches.append(batch)
+
+    if failed_batches:
+        print(f"Retrying {len(failed_batches)} failed batches after initial pass.")
+        still_failed: list[list[dict]] = []
+        for retry_number, batch in enumerate(tqdm(failed_batches, desc="retrying failed", unit="batch"), start=1):
+            if not judge_with_retries(batch, phase="final_retry", batch_number=retry_number):
+                still_failed.append(batch)
+        failed_batches = still_failed
+
+    if failed_batches:
+        unresolved = [pair_key(row) for batch in failed_batches for row in batch]
+        print(f"WARNING: {len(unresolved)} pairs still failed after retry pass. See {failed_log_path}")
+        for key in unresolved:
+            print(f"unresolved_pair: {key}")
+    elif failure_log:
+        print(f"All initially failed batches recovered. Failure attempt log: {failed_log_path}")
 
     final_rows = read_jsonl(output_path)
     final_by_key = {pair_key(row): row for row in final_rows if pair_key(row) in pair_by_key}

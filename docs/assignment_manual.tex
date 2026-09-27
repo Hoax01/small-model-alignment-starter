@@ -608,6 +608,8 @@ Your evaluator should:
   \item Read saved pairwise JSONL files.
   \item Judge in batches.
   \item Checkpoint judgments after each batch.
+  \item Sleep briefly between judge requests to avoid hammering the model proxy.
+  \item Retry failed batches and log unresolved failures.
   \item Resume from existing judgments when possible.
   \item Summarize win, loss, and tie rates.
 \end{enumerate}

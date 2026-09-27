@@ -233,6 +233,8 @@ python scripts/judge_pairwise_kaggle.py \
   --output_path outputs/eval/dpo_vs_sft_judged_kaggle.jsonl \
   --judge_model google/gemini-3.6-flash \
   --batch_size 5 \
+  --sleep_seconds 5 \
+  --max_retries 3 \
   --reuse_judgments
 ```
 
