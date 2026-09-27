@@ -170,14 +170,46 @@ Defaults use `Anthropic/hh-rlhf`. You can pass local HH-style JSON/JSONL with `-
 
 ## 6. Generate DPO Responses
 
+Run a quick sanity check before full generation:
+
 ```bash
 python scripts/generate_alpaca.py \
   --model_name_or_path outputs/dpo-qwen-0.5b/best \
   --subset_path data/alpaca_eval/alpacaeval_300_seed42.json \
-  --output_path outputs/eval/dpo_alpacaeval_300.json \
+  --output_path outputs/eval/sanity_dpo_5.json \
+  --generator_name qwen2.5-0.5b-dpo-sanity \
+  --batch_size 2 \
+  --max_new_tokens 256 \
+  --limit 5 \
+  --device cuda:0
+```
+
+For Kaggle T4x2, split generation over both GPUs and merge the shard files in the notebook:
+
+```bash
+python scripts/generate_alpaca.py \
+  --model_name_or_path outputs/dpo-qwen-0.5b/best \
+  --subset_path data/alpaca_eval/alpacaeval_300_seed42.json \
+  --output_path outputs/eval/dpo_shard0.json \
   --generator_name qwen2.5-0.5b-dpo \
   --batch_size 8 \
-  --max_new_tokens 512
+  --max_new_tokens 512 \
+  --device cuda:0 \
+  --num_shards 2 \
+  --shard_index 0 &
+
+python scripts/generate_alpaca.py \
+  --model_name_or_path outputs/dpo-qwen-0.5b/best \
+  --subset_path data/alpaca_eval/alpacaeval_300_seed42.json \
+  --output_path outputs/eval/dpo_shard1.json \
+  --generator_name qwen2.5-0.5b-dpo \
+  --batch_size 8 \
+  --max_new_tokens 512 \
+  --device cuda:1 \
+  --num_shards 2 \
+  --shard_index 1 &
+
+wait
 ```
 
 ## 7. Pairwise Evaluation

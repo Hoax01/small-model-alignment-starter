@@ -531,12 +531,60 @@ Submit DPO training logs, validation DPO loss, reward accuracy, reward margin, c
 \end{deliverablebox}
 
 \section{Task 5: Generate Evaluation Outputs}
-Generate responses on the same \alpaca{} subset for:
+Before launching full-subset generation, run a small sanity check on 2--5 prompts. Inspect the responses manually to confirm that the checkpoint path, tokenizer, prompt format, EOS behavior, and generation length are reasonable.
+
+\begin{lstlisting}[language=bash]
+python scripts/generate_alpaca.py \
+  --model_name_or_path outputs/sft-qwen-0.5b/best \
+  --subset_path data/alpaca_eval/alpacaeval_300_seed42.json \
+  --output_path outputs/eval/sanity_sft_5.json \
+  --generator_name qwen2.5-0.5b-sft-sanity \
+  --batch_size 2 \
+  --max_new_tokens 256 \
+  --limit 5 \
+  --device cuda:0
+\end{lstlisting}
+
+After the sanity check passes, generate responses on the same \alpaca{} subset for:
 \begin{enumerate}[leftmargin=*]
   \item Base model.
   \item SFT model.
   \item DPO model.
 \end{enumerate}
+
+\begin{infobox}{Using Both Kaggle T4 GPUs for Generation}
+Generation is embarrassingly parallel over prompts. On Kaggle T4x2, split the prompt subset into two interleaved shards and run one process on \texttt{cuda:0} and one process on \texttt{cuda:1}. Merge the shard outputs back into the original subset order before building pairwise files.
+\end{infobox}
+
+A two-GPU run for one model can be launched as two simultaneous processes:
+\begin{lstlisting}[language=bash]
+python scripts/generate_alpaca.py \
+  --model_name_or_path outputs/dpo-qwen-0.5b/best \
+  --subset_path data/alpaca_eval/alpacaeval_300_seed42.json \
+  --output_path outputs/eval/dpo_shard0.json \
+  --generator_name qwen2.5-0.5b-dpo \
+  --batch_size 8 \
+  --max_new_tokens 512 \
+  --device cuda:0 \
+  --num_shards 2 \
+  --shard_index 0 &
+
+python scripts/generate_alpaca.py \
+  --model_name_or_path outputs/dpo-qwen-0.5b/best \
+  --subset_path data/alpaca_eval/alpacaeval_300_seed42.json \
+  --output_path outputs/eval/dpo_shard1.json \
+  --generator_name qwen2.5-0.5b-dpo \
+  --batch_size 8 \
+  --max_new_tokens 512 \
+  --device cuda:1 \
+  --num_shards 2 \
+  --shard_index 1 &
+
+wait
+\end{lstlisting}
+
+Your notebook may wrap this in Python with \texttt{subprocess.Popen}, then merge the two JSON files by prompt ID. The provided Kaggle generation notebook includes a helper for this pattern.
+
 Build pairwise comparison files for:
 \begin{enumerate}[leftmargin=*]
   \item DPO versus SFT.
@@ -546,8 +594,9 @@ Build pairwise comparison files for:
 \end{enumerate}
 Randomize response order in each pairwise file and preserve the mapping from response position to model identity.
 
-\paragraph{Deliverables.}
-Submit all generation JSON files and all pairwise JSONL files.
+\begin{deliverablebox}{Generation Deliverables}
+Submit the sanity-check outputs, full generation JSON files for base/SFT/DPO, pairwise JSONL files, generation throughput, and a short note explaining whether you used one or two GPUs.
+\end{deliverablebox}
 
 \section{Task 6: Evaluation With Kaggle Models}
 Use Kaggle model access through \texttt{kaggle\_benchmarks} or an equivalent Kaggle-supported model interface. A suitable judge model is:

@@ -21,6 +21,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max_new_tokens", type=int, default=512)
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--top_p", type=float, default=1.0)
+    parser.add_argument("--device", default=None, help="Generation device, e.g. cuda:0, cuda:1, or cpu. Defaults to cuda:0 when available.")
+    parser.add_argument("--limit", type=int, default=None, help="Generate only the first N selected prompts. Useful for sanity checks.")
+    parser.add_argument("--num_shards", type=int, default=1, help="Split the selected prompts into this many interleaved shards.")
+    parser.add_argument("--shard_index", type=int, default=0, help="Generate only this shard index in [0, num_shards).")
     parser.add_argument("--no_fp16", action="store_true")
     return parser.parse_args()
 
@@ -28,7 +32,12 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     print(cuda_summary())
-    device = "cuda:0" if torch.cuda.is_available() else "cpu"
+    if args.num_shards < 1:
+        raise ValueError("--num_shards must be at least 1")
+    if not 0 <= args.shard_index < args.num_shards:
+        raise ValueError("--shard_index must satisfy 0 <= shard_index < num_shards")
+
+    device = args.device or ("cuda:0" if torch.cuda.is_available() else "cpu")
     use_fp16 = (not args.no_fp16) and device.startswith("cuda")
     tokenizer = load_tokenizer(args.model_name_or_path)
     tokenizer.padding_side = "left"
@@ -36,6 +45,13 @@ def main() -> None:
     model.eval()
 
     rows = read_json(args.subset_path)
+    if args.limit is not None:
+        rows = rows[: args.limit]
+    if args.num_shards > 1:
+        rows = rows[args.shard_index :: args.num_shards]
+        print(f"Generating shard {args.shard_index}/{args.num_shards} with {len(rows)} prompts on {device}")
+    else:
+        print(f"Generating {len(rows)} prompts on {device}")
     outputs = []
     start = time.time()
     for start_idx in tqdm(range(0, len(rows), args.batch_size), desc="generate"):
