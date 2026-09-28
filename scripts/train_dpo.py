@@ -31,7 +31,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gradient_accumulation_steps", type=int, default=32)
     parser.add_argument("--num_epochs", type=int, default=1)
     parser.add_argument("--learning_rate", type=float, default=1e-6)
-    parser.add_argument("--optimizer", choices=["rmsprop", "adamw"], default="rmsprop")
+    parser.add_argument("--optimizer", choices=["rmsprop", "adamw", "adamw8bit"], default="rmsprop")
     parser.add_argument("--weight_decay", type=float, default=0.0)
     parser.add_argument("--beta", type=float, default=0.1)
     parser.add_argument("--max_grad_norm", type=float, default=1.0)
@@ -103,8 +103,15 @@ def maybe_apply_lora(model, args):
 
 
 def build_optimizer(parameters, args):
+    parameters = list(parameters)
     if args.optimizer == "adamw":
         return torch.optim.AdamW(parameters, lr=args.learning_rate, weight_decay=args.weight_decay)
+    if args.optimizer == "adamw8bit":
+        try:
+            import bitsandbytes as bnb
+        except ImportError as exc:
+            raise ImportError("optimizer='adamw8bit' requires bitsandbytes. Install requirements.txt or `pip install bitsandbytes`.") from exc
+        return bnb.optim.AdamW8bit(parameters, lr=args.learning_rate, weight_decay=args.weight_decay)
     return torch.optim.RMSprop(parameters, lr=args.learning_rate, weight_decay=args.weight_decay)
 
 

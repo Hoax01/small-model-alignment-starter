@@ -34,7 +34,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--learning_rate", type=float, default=2e-5)
     parser.add_argument("--weight_decay", type=float, default=0.1)
     parser.add_argument("--warmup_ratio", type=float, default=0.03)
-    parser.add_argument("--optimizer", choices=["adamw", "rmsprop"], default="adamw")
+    parser.add_argument("--optimizer", choices=["adamw", "adamw8bit", "rmsprop"], default="adamw")
     parser.add_argument("--max_grad_norm", type=float, default=1.0)
     parser.add_argument("--logging_steps", type=int, default=10)
     parser.add_argument("--eval_steps", type=int, default=250)
@@ -51,6 +51,19 @@ def load_rows(dataset_name: str, split: str, path: str | None, max_examples: int
     else:
         rows = [dict(row) for row in load_dataset(dataset_name, split=split)]
     return maybe_sample(rows, max_examples, seed)
+
+
+def build_optimizer(parameters, args):
+    parameters = list(parameters)
+    if args.optimizer == "adamw":
+        return torch.optim.AdamW(parameters, lr=args.learning_rate, weight_decay=args.weight_decay)
+    if args.optimizer == "adamw8bit":
+        try:
+            import bitsandbytes as bnb
+        except ImportError as exc:
+            raise ImportError("optimizer='adamw8bit' requires bitsandbytes. Install requirements.txt or `pip install bitsandbytes`.") from exc
+        return bnb.optim.AdamW8bit(parameters, lr=args.learning_rate, weight_decay=args.weight_decay)
+    return torch.optim.RMSprop(parameters, lr=args.learning_rate, weight_decay=args.weight_decay)
 
 
 @torch.no_grad()
@@ -107,10 +120,7 @@ def main() -> None:
     )
     val_loader = DataLoader(val_dataset, batch_size=args.per_device_batch_size, shuffle=False, collate_fn=collate)
 
-    if args.optimizer == "adamw":
-        optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
-    else:
-        optimizer = torch.optim.RMSprop(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
+    optimizer = build_optimizer(model.parameters(), args)
     total_update_steps = max(1, (len(train_loader) * args.num_epochs) // args.gradient_accumulation_steps)
     warmup_steps = int(total_update_steps * args.warmup_ratio)
 
