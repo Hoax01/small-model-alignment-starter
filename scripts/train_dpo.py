@@ -8,7 +8,7 @@ from datasets import load_dataset
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
-from qwen_dpo_alignment.data import DPODataset, collate_dpo, extract_hh_pair, load_json_or_jsonl, maybe_sample
+from qwen_dpo_alignment.data import DPODataset, collate_dpo, extract_dpo_pair, load_json_or_jsonl, maybe_sample
 from qwen_dpo_alignment.modeling import amp_context, dpo_loss, load_causal_lm, load_tokenizer, make_grad_scaler, sequence_logps
 from qwen_dpo_alignment.utils import cuda_summary, ensure_dir, seed_everything, write_json
 
@@ -40,19 +40,28 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def load_hh_rows(dataset_name: str, split: str, path: str | None, max_examples: int | None, seed: int):
+def resolve_split(dataset_name: str, split: str) -> str:
+    if "ultrafeedback_binarized" in dataset_name.lower():
+        if split == "train":
+            return "train_prefs"
+        if split == "test":
+            return "test_prefs"
+    return split
+
+
+def load_dpo_rows(dataset_name: str, split: str, path: str | None, max_examples: int | None, seed: int):
     if path:
         raw_rows = load_json_or_jsonl(path)
+        source = str(path)
     else:
-        raw_rows = [dict(row) for row in load_dataset(dataset_name, split=split)]
+        resolved_split = resolve_split(dataset_name, split)
+        raw_rows = [dict(row) for row in load_dataset(dataset_name, split=resolved_split)]
+        source = dataset_name
     rows = []
     for row in raw_rows:
-        if {"instruction", "chosen", "rejected"}.issubset(row):
-            rows.append(row)
-        else:
-            parsed = extract_hh_pair(row, source=dataset_name)
-            if parsed is not None:
-                rows.append(parsed)
+        parsed = extract_dpo_pair(row, source=source)
+        if parsed is not None:
+            rows.append(parsed)
     return maybe_sample(rows, max_examples, seed)
 
 
@@ -119,8 +128,8 @@ def main() -> None:
         policy.gradient_checkpointing_enable()
         policy.config.use_cache = False
 
-    train_rows = load_hh_rows(args.dataset_name, args.train_split, args.train_file, args.max_train_examples, args.seed)
-    val_rows = load_hh_rows(args.dataset_name, args.val_split, args.val_file, args.max_val_examples, args.seed + 1)
+    train_rows = load_dpo_rows(args.dataset_name, args.train_split, args.train_file, args.max_train_examples, args.seed)
+    val_rows = load_dpo_rows(args.dataset_name, args.val_split, args.val_file, args.max_val_examples, args.seed + 1)
     train_dataset = DPODataset(train_rows, tokenizer, args.max_length, args.max_prompt_length)
     val_dataset = DPODataset(val_rows, tokenizer, args.max_length, args.max_prompt_length)
     print(f"Loaded {len(train_dataset)} DPO train pairs and {len(val_dataset)} validation pairs.")

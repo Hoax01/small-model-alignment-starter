@@ -57,6 +57,125 @@ def extract_sft_pair(row: dict[str, Any]) -> tuple[str, str] | None:
     return None
 
 
+
+def message_text(message: Any) -> str:
+    if isinstance(message, str):
+        return message
+    if isinstance(message, dict):
+        value = message.get("content") or message.get("value") or message.get("text") or ""
+        return str(value)
+    return str(message or "")
+
+
+def messages_to_prompt_response(messages: Any) -> tuple[str, str] | None:
+    if isinstance(messages, str):
+        return None
+    if not isinstance(messages, list):
+        return None
+    user_parts = []
+    assistant_parts = []
+    seen_assistant = False
+    for msg in messages:
+        role = ""
+        if isinstance(msg, dict):
+            role = str(msg.get("role") or msg.get("from") or "").lower()
+        text = message_text(msg).strip()
+        if not text:
+            continue
+        if role in {"assistant", "gpt", "bot"}:
+            seen_assistant = True
+            assistant_parts.append(text)
+        elif not seen_assistant and role in {"user", "human"}:
+            user_parts.append(text)
+        elif not seen_assistant and not role:
+            user_parts.append(text)
+    prompt = "\n\n".join(user_parts).strip()
+    response = "\n\n".join(assistant_parts).strip()
+    if prompt and response:
+        return prompt, response
+    return None
+
+
+def response_from_messages(value: Any) -> str | None:
+    if isinstance(value, str):
+        value = value.strip()
+        return value or None
+    if isinstance(value, list):
+        assistant_parts = []
+        fallback_parts = []
+        for msg in value:
+            text = message_text(msg).strip()
+            if not text:
+                continue
+            fallback_parts.append(text)
+            role = ""
+            if isinstance(msg, dict):
+                role = str(msg.get("role") or msg.get("from") or "").lower()
+            if role in {"assistant", "gpt", "bot"}:
+                assistant_parts.append(text)
+        response = "\n\n".join(assistant_parts or fallback_parts).strip()
+        return response or None
+    return None
+
+
+def prompt_from_value(value: Any) -> str | None:
+    if isinstance(value, str):
+        value = value.strip()
+        return value or None
+    pair = messages_to_prompt_response(value)
+    if pair is not None:
+        return pair[0]
+    return response_from_messages(value)
+
+
+def extract_ultrafeedback_pair(row: dict[str, Any], source: str = "ultrafeedback") -> dict[str, str] | None:
+    chosen = row.get("chosen")
+    rejected = row.get("rejected")
+    if not chosen or not rejected:
+        return None
+
+    instruction = None
+    for key in ("prompt", "instruction", "input", "question"):
+        if row.get(key):
+            instruction = prompt_from_value(row[key])
+            if instruction:
+                break
+
+    if instruction is None:
+        chosen_pair = messages_to_prompt_response(chosen)
+        rejected_pair = messages_to_prompt_response(rejected)
+        if chosen_pair is not None and rejected_pair is not None and chosen_pair[0] == rejected_pair[0]:
+            instruction = chosen_pair[0]
+            chosen_response = chosen_pair[1]
+            rejected_response = rejected_pair[1]
+        else:
+            return None
+    else:
+        chosen_response = response_from_messages(chosen)
+        rejected_response = response_from_messages(rejected)
+
+    if not instruction or not chosen_response or not rejected_response:
+        return None
+    return {
+        "instruction": instruction.strip(),
+        "chosen": chosen_response.strip(),
+        "rejected": rejected_response.strip(),
+        "source": source,
+    }
+
+
+def extract_dpo_pair(row: dict[str, Any], source: str = "unknown") -> dict[str, str] | None:
+    if {"instruction", "chosen", "rejected"}.issubset(row):
+        instruction = str(row["instruction"]).strip()
+        chosen = response_from_messages(row["chosen"])
+        rejected = response_from_messages(row["rejected"])
+        if instruction and chosen and rejected:
+            return {"instruction": instruction, "chosen": chosen, "rejected": rejected, "source": source}
+    if "ultrafeedback" in source.lower():
+        return extract_ultrafeedback_pair(row, source=source)
+    return extract_hh_pair(row, source=source) or extract_ultrafeedback_pair(row, source=source)
+
+
 def extract_hh_pair(row: dict[str, Any], source: str = "hh") -> dict[str, str] | None:
     chosen = row.get("chosen")
     rejected = row.get("rejected")
