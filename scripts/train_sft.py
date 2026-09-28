@@ -11,7 +11,7 @@ from tqdm.auto import tqdm
 
 from qwen_dpo_alignment.data import SFTDataset, collate_sft, load_json_or_jsonl, maybe_sample
 from qwen_dpo_alignment.modeling import amp_context, load_causal_lm, load_tokenizer, make_grad_scaler
-from qwen_dpo_alignment.utils import cuda_summary, ensure_dir, seed_everything, write_json
+from qwen_dpo_alignment.utils import append_jsonl, cuda_summary, ensure_dir, seed_everything, write_json
 
 
 def parse_args() -> argparse.Namespace:
@@ -72,7 +72,9 @@ def main() -> None:
     args = parse_args()
     seed_everything(args.seed)
     output_dir = ensure_dir(args.output_dir)
+    metrics_path = output_dir / "metrics.jsonl"
     write_json(output_dir / "sft_args.json", vars(args))
+    metrics_path.write_text("", encoding="utf-8")
 
     print(cuda_summary())
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
@@ -144,11 +146,33 @@ def main() -> None:
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
 
-                pbar.set_postfix(loss=f"{loss.item():.4f}", lr=f"{scheduler.get_last_lr()[0]:.2e}")
+                current_lr = scheduler.get_last_lr()[0]
+                train_loss = loss.detach().float().item()
+                pbar.set_postfix(loss=f"{train_loss:.4f}", lr=f"{current_lr:.2e}")
+                append_jsonl(
+                    metrics_path,
+                    {
+                        "phase": "train",
+                        "epoch": epoch + 1,
+                        "step": global_step,
+                        "train_loss": train_loss,
+                        "learning_rate": current_lr,
+                    },
+                )
                 if global_step % args.logging_steps == 0:
-                    print(f"step={global_step} train_loss={loss.item():.4f} lr={scheduler.get_last_lr()[0]:.2e}")
+                    print(f"step={global_step} train_loss={train_loss:.4f} lr={current_lr:.2e}")
                 if global_step % args.eval_steps == 0:
                     val_loss = evaluate(model, val_loader, device, use_fp16)
+                    append_jsonl(
+                        metrics_path,
+                        {
+                            "phase": "eval",
+                            "epoch": epoch + 1,
+                            "step": global_step,
+                            "val_loss": val_loss,
+                            "learning_rate": current_lr,
+                        },
+                    )
                     print(f"step={global_step} val_loss={val_loss:.4f}")
                     if val_loss < best_val_loss:
                         best_val_loss = val_loss

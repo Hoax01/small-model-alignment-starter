@@ -42,6 +42,12 @@ def write_jsonl(path: str | os.PathLike[str], rows: list[dict[str, Any]]) -> Non
             fout.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
+def append_jsonl(path: str | os.PathLike[str], row: dict[str, Any]) -> None:
+    ensure_dir(Path(path).parent)
+    with open(path, "a", encoding="utf-8") as fout:
+        fout.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
 def now_tag() -> str:
     return time.strftime("%Y%m%d_%H%M%S")
 

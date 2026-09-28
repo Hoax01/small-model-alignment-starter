@@ -10,7 +10,7 @@ from tqdm.auto import tqdm
 
 from qwen_dpo_alignment.data import DPODataset, collate_dpo, extract_dpo_pair, load_json_or_jsonl, maybe_sample
 from qwen_dpo_alignment.modeling import amp_context, dpo_loss, load_causal_lm, load_tokenizer, make_grad_scaler, sequence_logps
-from qwen_dpo_alignment.utils import cuda_summary, ensure_dir, seed_everything, write_json
+from qwen_dpo_alignment.utils import append_jsonl, cuda_summary, ensure_dir, seed_everything, write_json
 
 
 def parse_args() -> argparse.Namespace:
@@ -83,6 +83,8 @@ def evaluate(policy, reference, dataloader, policy_device: str, ref_device: str,
     losses = []
     accuracies = []
     margins = []
+    policy_logratios = []
+    ref_logratios = []
     for batch in tqdm(dataloader, desc="eval", leave=False):
         policy_chosen, policy_rejected = logps_for_batch(policy, batch, policy_device, use_fp16)
         ref_chosen, ref_rejected = logps_for_batch(reference, batch, ref_device, use_fp16)
@@ -96,11 +98,15 @@ def evaluate(policy, reference, dataloader, policy_device: str, ref_device: str,
         losses.append(loss.detach().float().cpu())
         accuracies.append(metrics["reward_accuracy"].detach().float().cpu())
         margins.append(metrics["reward_margin"].detach().float().cpu())
+        policy_logratios.append(metrics["policy_logratio"].detach().float().cpu())
+        ref_logratios.append(metrics["ref_logratio"].detach().float().cpu())
     policy.train()
     return {
         "loss": torch.stack(losses).mean().item(),
         "reward_accuracy": torch.stack(accuracies).mean().item(),
         "reward_margin": torch.stack(margins).mean().item(),
+        "policy_logratio": torch.stack(policy_logratios).mean().item(),
+        "ref_logratio": torch.stack(ref_logratios).mean().item(),
     }
 
 
@@ -108,7 +114,9 @@ def main() -> None:
     args = parse_args()
     seed_everything(args.seed)
     output_dir = ensure_dir(args.output_dir)
+    metrics_path = output_dir / "metrics.jsonl"
     write_json(output_dir / "dpo_args.json", vars(args))
+    metrics_path.write_text("", encoding="utf-8")
 
     print(cuda_summary())
     policy_device = "cuda:0" if torch.cuda.is_available() else "cpu"
@@ -175,15 +183,38 @@ def main() -> None:
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
 
-                pbar.set_postfix(loss=f"{loss.item():.4f}", acc=f"{metrics['reward_accuracy'].item():.3f}")
+                train_metrics = {name: value.detach().float().item() for name, value in metrics.items()}
+                train_loss = loss.detach().float().item()
+                pbar.set_postfix(loss=f"{train_loss:.4f}", acc=f"{train_metrics['reward_accuracy']:.3f}")
+                append_jsonl(
+                    metrics_path,
+                    {
+                        "phase": "train",
+                        "epoch": epoch + 1,
+                        "step": global_step,
+                        "loss": train_loss,
+                        "learning_rate": args.learning_rate,
+                        **train_metrics,
+                    },
+                )
                 if global_step % args.logging_steps == 0:
                     print(
-                        f"step={global_step} loss={loss.item():.4f} "
-                        f"reward_acc={metrics['reward_accuracy'].item():.3f} "
-                        f"margin={metrics['reward_margin'].item():.4f}"
+                        f"step={global_step} loss={train_loss:.4f} "
+                        f"reward_acc={train_metrics['reward_accuracy']:.3f} "
+                        f"margin={train_metrics['reward_margin']:.4f}"
                     )
                 if global_step % args.eval_steps == 0:
                     val_metrics = evaluate(policy, reference, val_loader, policy_device, ref_device, use_fp16, args.beta)
+                    append_jsonl(
+                        metrics_path,
+                        {
+                            "phase": "eval",
+                            "epoch": epoch + 1,
+                            "step": global_step,
+                            "learning_rate": args.learning_rate,
+                            **{f"val_{name}": value for name, value in val_metrics.items()},
+                        },
+                    )
                     print(f"step={global_step} val={val_metrics}")
                     if val_metrics["reward_accuracy"] > best_accuracy:
                         best_accuracy = val_metrics["reward_accuracy"]
