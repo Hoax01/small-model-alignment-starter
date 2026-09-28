@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
 from qwen_dpo_alignment.data import SFTDataset, collate_sft, load_json_or_jsonl, maybe_sample
-from qwen_dpo_alignment.modeling import amp_context, load_causal_lm, load_tokenizer, make_grad_scaler
+from qwen_dpo_alignment.modeling import amp_context, causal_lm_loss, load_causal_lm, load_tokenizer, make_grad_scaler
 from qwen_dpo_alignment.utils import append_jsonl, cuda_summary, ensure_dir, seed_everything, write_json
 
 
@@ -39,6 +39,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--logging_steps", type=int, default=10)
     parser.add_argument("--eval_steps", type=int, default=250)
     parser.add_argument("--save_steps", type=int, default=0, help="Save intermediate step checkpoints every N optimizer steps; 0 disables them.")
+    parser.add_argument("--loss_chunk_size", type=int, default=64, help="Number of sequence positions per fp32 loss chunk; lower saves memory.")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--no_fp16", action="store_true")
     parser.add_argument("--no_gradient_checkpointing", action="store_true")
@@ -67,17 +68,17 @@ def build_optimizer(parameters, args):
 
 
 @torch.no_grad()
-def evaluate(model, dataloader, device: str, use_fp16: bool) -> float:
+def evaluate(model, dataloader, device: str, use_fp16: bool, loss_chunk_size: int) -> float:
     model.eval()
     losses = []
     for batch in tqdm(dataloader, desc="eval", leave=False):
         batch = batch.to(device)
         with amp_context(device, use_fp16):
-            loss = model(
+            logits = model(
                 input_ids=batch.input_ids,
                 attention_mask=batch.attention_mask,
-                labels=batch.labels,
-            ).loss
+            ).logits
+            loss = causal_lm_loss(logits, batch.labels, chunk_size=loss_chunk_size)
         losses.append(loss.detach().float().cpu())
     model.train()
     return torch.stack(losses).mean().item()
@@ -143,11 +144,11 @@ def main() -> None:
         for micro_step, batch in enumerate(pbar, start=1):
             batch = batch.to(device)
             with amp_context(device, use_fp16):
-                loss = model(
+                logits = model(
                     input_ids=batch.input_ids,
                     attention_mask=batch.attention_mask,
-                    labels=batch.labels,
-                ).loss
+                ).logits
+                loss = causal_lm_loss(logits, batch.labels, chunk_size=args.loss_chunk_size)
                 scaled_loss = loss / args.gradient_accumulation_steps
 
             scaler.scale(scaled_loss).backward()
@@ -177,7 +178,7 @@ def main() -> None:
                 if global_step % args.logging_steps == 0:
                     print(f"step={global_step} train_loss={train_loss:.4f} lr={current_lr:.2e}")
                 if global_step % args.eval_steps == 0:
-                    val_loss = evaluate(model, val_loader, device, use_fp16)
+                    val_loss = evaluate(model, val_loader, device, use_fp16, args.loss_chunk_size)
                     append_jsonl(
                         metrics_path,
                         {
