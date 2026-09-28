@@ -18,6 +18,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output_path", required=True)
     parser.add_argument("--generator_name", required=True)
     parser.add_argument("--batch_size", type=int, default=8)
+    parser.add_argument("--prompt_format", choices=["plain", "chat_template"], default="plain")
     parser.add_argument("--max_new_tokens", type=int, default=512)
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--top_p", type=float, default=1.0)
@@ -56,7 +57,19 @@ def main() -> None:
     start = time.time()
     for start_idx in tqdm(range(0, len(rows), args.batch_size), desc="generate"):
         batch_rows = rows[start_idx : start_idx + args.batch_size]
-        prompts = [format_prompt(row["instruction"]) for row in batch_rows]
+        if args.prompt_format == "chat_template":
+            if not getattr(tokenizer, "chat_template", None):
+                raise ValueError("prompt_format='chat_template' requires a tokenizer with a chat_template.")
+            prompts = [
+                tokenizer.apply_chat_template(
+                    [{"role": "user", "content": row["instruction"]}],
+                    tokenize=False,
+                    add_generation_prompt=True,
+                )
+                for row in batch_rows
+            ]
+        else:
+            prompts = [format_prompt(row["instruction"]) for row in batch_rows]
         encoded = tokenizer(prompts, return_tensors="pt", padding=True, truncation=True).to(device)
         generation_kwargs = {
             "max_new_tokens": args.max_new_tokens,

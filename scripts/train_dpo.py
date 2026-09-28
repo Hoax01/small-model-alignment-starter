@@ -26,10 +26,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max_val_examples", type=int, default=500)
     parser.add_argument("--max_length", type=int, default=512)
     parser.add_argument("--max_prompt_length", type=int, default=256)
+    parser.add_argument("--prompt_format", choices=["plain", "chat_template"], default="plain")
     parser.add_argument("--per_device_batch_size", type=int, default=1)
     parser.add_argument("--gradient_accumulation_steps", type=int, default=32)
     parser.add_argument("--num_epochs", type=int, default=1)
     parser.add_argument("--learning_rate", type=float, default=1e-6)
+    parser.add_argument("--optimizer", choices=["rmsprop", "adamw"], default="rmsprop")
+    parser.add_argument("--weight_decay", type=float, default=0.0)
     parser.add_argument("--beta", type=float, default=0.1)
     parser.add_argument("--max_grad_norm", type=float, default=1.0)
     parser.add_argument("--logging_steps", type=int, default=10)
@@ -37,6 +40,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--no_fp16", action="store_true")
     parser.add_argument("--no_gradient_checkpointing", action="store_true")
+    parser.add_argument("--use_lora", action="store_true")
+    parser.add_argument("--lora_r", type=int, default=16)
+    parser.add_argument("--lora_alpha", type=int, default=32)
+    parser.add_argument("--lora_dropout", type=float, default=0.05)
+    parser.add_argument(
+        "--lora_target_modules",
+        default="q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj",
+        help="Comma-separated module names to adapt with LoRA.",
+    )
     return parser.parse_args()
 
 
@@ -63,6 +75,37 @@ def load_dpo_rows(dataset_name: str, split: str, path: str | None, max_examples:
         if parsed is not None:
             rows.append(parsed)
     return maybe_sample(rows, max_examples, seed)
+
+
+def maybe_apply_lora(model, args):
+    if not args.use_lora:
+        return model
+    try:
+        from peft import LoraConfig, get_peft_model
+    except ImportError as exc:
+        raise ImportError("LoRA training requires peft. Install requirements.txt or `pip install peft`.") from exc
+
+    target_modules = [name.strip() for name in args.lora_target_modules.split(",") if name.strip()]
+    config = LoraConfig(
+        r=args.lora_r,
+        lora_alpha=args.lora_alpha,
+        lora_dropout=args.lora_dropout,
+        target_modules=target_modules,
+        bias="none",
+        task_type="CAUSAL_LM",
+    )
+    model = get_peft_model(model, config)
+    for param in model.parameters():
+        if param.requires_grad:
+            param.data = param.data.float()
+    model.print_trainable_parameters()
+    return model
+
+
+def build_optimizer(parameters, args):
+    if args.optimizer == "adamw":
+        return torch.optim.AdamW(parameters, lr=args.learning_rate, weight_decay=args.weight_decay)
+    return torch.optim.RMSprop(parameters, lr=args.learning_rate, weight_decay=args.weight_decay)
 
 
 def logps_for_batch(model, batch, device: str, use_fp16: bool) -> tuple[torch.Tensor, torch.Tensor]:
@@ -125,21 +168,25 @@ def main() -> None:
     print(f"policy_device={policy_device} ref_device={ref_device}")
 
     tokenizer = load_tokenizer(args.model_name_or_path)
-    # Keep the trainable policy in fp32. AMP autocast still uses fp16 compute,
-    # but GradScaler cannot unscale gradients from fp16 trainable weights.
-    policy = load_causal_lm(args.model_name_or_path, device=policy_device, fp16=False)
+    # Full DPO keeps trainable weights in fp32 because GradScaler cannot unscale
+    # fp16 trainable gradients. LoRA freezes the base model, so the base can stay
+    # fp16 while trainable adapter weights are cast back to fp32.
+    policy = load_causal_lm(args.model_name_or_path, device=policy_device, fp16=use_fp16 if args.use_lora else False)
+    policy = maybe_apply_lora(policy, args)
     # The frozen reference can be fp16 to save memory. It is only used under no_grad.
     reference = load_causal_lm(args.model_name_or_path, device=ref_device, fp16=use_fp16)
     reference.requires_grad_(False)
     reference.eval()
     if not args.no_gradient_checkpointing:
+        if args.use_lora and hasattr(policy, "enable_input_require_grads"):
+            policy.enable_input_require_grads()
         policy.gradient_checkpointing_enable()
         policy.config.use_cache = False
 
     train_rows = load_dpo_rows(args.dataset_name, args.train_split, args.train_file, args.max_train_examples, args.seed)
     val_rows = load_dpo_rows(args.dataset_name, args.val_split, args.val_file, args.max_val_examples, args.seed + 1)
-    train_dataset = DPODataset(train_rows, tokenizer, args.max_length, args.max_prompt_length)
-    val_dataset = DPODataset(val_rows, tokenizer, args.max_length, args.max_prompt_length)
+    train_dataset = DPODataset(train_rows, tokenizer, args.max_length, args.max_prompt_length, args.prompt_format)
+    val_dataset = DPODataset(val_rows, tokenizer, args.max_length, args.max_prompt_length, args.prompt_format)
     print(f"Loaded {len(train_dataset)} DPO train pairs and {len(val_dataset)} validation pairs.")
 
     collate = functools.partial(collate_dpo, pad_token_id=tokenizer.pad_token_id)
@@ -153,7 +200,7 @@ def main() -> None:
     )
     val_loader = DataLoader(val_dataset, batch_size=args.per_device_batch_size, shuffle=False, collate_fn=collate)
 
-    optimizer = torch.optim.RMSprop(policy.parameters(), lr=args.learning_rate)
+    optimizer = build_optimizer((param for param in policy.parameters() if param.requires_grad), args)
     scaler = make_grad_scaler(policy_device, use_fp16)
     best_accuracy = -1.0
     global_step = 0

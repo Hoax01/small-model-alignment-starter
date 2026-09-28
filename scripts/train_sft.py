@@ -27,12 +27,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max_val_examples", type=int, default=1000)
     parser.add_argument("--max_length", type=int, default=512)
     parser.add_argument("--max_prompt_length", type=int, default=256)
+    parser.add_argument("--prompt_format", choices=["plain", "chat_template"], default="plain")
     parser.add_argument("--per_device_batch_size", type=int, default=2)
     parser.add_argument("--gradient_accumulation_steps", type=int, default=16)
     parser.add_argument("--num_epochs", type=int, default=1)
     parser.add_argument("--learning_rate", type=float, default=2e-5)
     parser.add_argument("--weight_decay", type=float, default=0.1)
     parser.add_argument("--warmup_ratio", type=float, default=0.03)
+    parser.add_argument("--optimizer", choices=["adamw", "rmsprop"], default="adamw")
     parser.add_argument("--max_grad_norm", type=float, default=1.0)
     parser.add_argument("--logging_steps", type=int, default=10)
     parser.add_argument("--eval_steps", type=int, default=250)
@@ -90,8 +92,8 @@ def main() -> None:
 
     train_rows = load_rows(args.dataset_name, args.train_split, args.train_file, args.max_train_examples, args.seed)
     val_rows = load_rows(args.dataset_name, args.val_split, args.val_file, args.max_val_examples, args.seed + 1)
-    train_dataset = SFTDataset(train_rows, tokenizer, args.max_length, args.max_prompt_length)
-    val_dataset = SFTDataset(val_rows, tokenizer, args.max_length, args.max_prompt_length)
+    train_dataset = SFTDataset(train_rows, tokenizer, args.max_length, args.max_prompt_length, args.prompt_format)
+    val_dataset = SFTDataset(val_rows, tokenizer, args.max_length, args.max_prompt_length, args.prompt_format)
     print(f"Loaded {len(train_dataset)} SFT train examples and {len(val_dataset)} validation examples.")
 
     collate = functools.partial(collate_sft, pad_token_id=tokenizer.pad_token_id)
@@ -105,7 +107,10 @@ def main() -> None:
     )
     val_loader = DataLoader(val_dataset, batch_size=args.per_device_batch_size, shuffle=False, collate_fn=collate)
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
+    if args.optimizer == "adamw":
+        optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
+    else:
+        optimizer = torch.optim.RMSprop(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
     total_update_steps = max(1, (len(train_loader) * args.num_epochs) // args.gradient_accumulation_steps)
     warmup_steps = int(total_update_steps * args.warmup_ratio)
 

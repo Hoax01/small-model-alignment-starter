@@ -211,7 +211,13 @@ def build_lm_example(
     response: str,
     max_length: int,
     max_prompt_length: int,
+    prompt_format: str = "plain",
 ) -> dict[str, list[int]]:
+    if prompt_format == "chat_template":
+        return build_chat_template_example(tokenizer, instruction, response, max_length)
+    if prompt_format != "plain":
+        raise ValueError(f"Unsupported prompt_format: {prompt_format}")
+
     prompt_ids = tokenizer(format_prompt(instruction), add_special_tokens=False).input_ids
     response_ids = tokenizer(response.strip() + tokenizer.eos_token, add_special_tokens=False).input_ids
 
@@ -226,6 +232,40 @@ def build_lm_example(
     return {"input_ids": input_ids, "labels": labels, "attention_mask": attention_mask}
 
 
+def build_chat_template_example(
+    tokenizer,
+    instruction: str,
+    response: str,
+    max_length: int,
+) -> dict[str, list[int]]:
+    if not getattr(tokenizer, "chat_template", None):
+        raise ValueError("prompt_format='chat_template' requires a tokenizer with a chat_template.")
+
+    prompt_messages = [{"role": "user", "content": instruction.strip()}]
+    full_messages = [*prompt_messages, {"role": "assistant", "content": response.strip()}]
+    prompt_ids = tokenizer.apply_chat_template(
+        prompt_messages,
+        tokenize=True,
+        add_generation_prompt=True,
+    )
+    input_ids = tokenizer.apply_chat_template(
+        full_messages,
+        tokenize=True,
+        add_generation_prompt=False,
+    )
+
+    if hasattr(prompt_ids, "tolist"):
+        prompt_ids = prompt_ids.tolist()
+    if hasattr(input_ids, "tolist"):
+        input_ids = input_ids.tolist()
+
+    input_ids = list(input_ids)[:max_length]
+    prompt_len = min(len(prompt_ids), len(input_ids))
+    labels = [-100] * prompt_len + input_ids[prompt_len:]
+    attention_mask = [1] * len(input_ids)
+    return {"input_ids": input_ids, "labels": labels, "attention_mask": attention_mask}
+
+
 class SFTDataset(Dataset):
     def __init__(
         self,
@@ -233,11 +273,13 @@ class SFTDataset(Dataset):
         tokenizer,
         max_length: int,
         max_prompt_length: int,
+        prompt_format: str = "plain",
     ) -> None:
         self.examples = []
         self.tokenizer = tokenizer
         self.max_length = max_length
         self.max_prompt_length = max_prompt_length
+        self.prompt_format = prompt_format
         for row in rows:
             pair = extract_sft_pair(row)
             if pair is not None:
@@ -254,6 +296,7 @@ class SFTDataset(Dataset):
             ex["response"],
             self.max_length,
             self.max_prompt_length,
+            self.prompt_format,
         )
 
 
@@ -264,11 +307,13 @@ class DPODataset(Dataset):
         tokenizer,
         max_length: int,
         max_prompt_length: int,
+        prompt_format: str = "plain",
     ) -> None:
         self.examples = list(rows)
         self.tokenizer = tokenizer
         self.max_length = max_length
         self.max_prompt_length = max_prompt_length
+        self.prompt_format = prompt_format
 
     def __len__(self) -> int:
         return len(self.examples)
@@ -281,6 +326,7 @@ class DPODataset(Dataset):
             ex["chosen"],
             self.max_length,
             self.max_prompt_length,
+            self.prompt_format,
         )
         rejected = build_lm_example(
             self.tokenizer,
@@ -288,6 +334,7 @@ class DPODataset(Dataset):
             ex["rejected"],
             self.max_length,
             self.max_prompt_length,
+            self.prompt_format,
         )
         return {
             "instruction": ex["instruction"],

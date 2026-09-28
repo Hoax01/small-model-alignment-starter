@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from contextlib import nullcontext
 from dataclasses import dataclass
+import json
+from pathlib import Path
 
 import torch
 import torch.nn.functional as F
@@ -36,14 +38,31 @@ def load_tokenizer(model_name_or_path: str):
     return tokenizer
 
 
+def _adapter_base_model_name(model_name_or_path: str) -> str | None:
+    adapter_config_path = Path(model_name_or_path) / "adapter_config.json"
+    if not adapter_config_path.exists():
+        return None
+    with adapter_config_path.open("r", encoding="utf-8") as fin:
+        adapter_config = json.load(fin)
+    return adapter_config.get("base_model_name_or_path")
+
+
 def load_causal_lm(model_name_or_path: str, *, device: str, fp16: bool = True):
     dtype = torch.float16 if fp16 and device.startswith("cuda") else torch.float32
+    adapter_base_model = _adapter_base_model_name(model_name_or_path)
+    load_path = adapter_base_model or model_name_or_path
     model = AutoModelForCausalLM.from_pretrained(
-        model_name_or_path,
+        load_path,
         dtype=dtype,
         trust_remote_code=True,
         low_cpu_mem_usage=True,
     )
+    if adapter_base_model is not None:
+        try:
+            from peft import PeftModel
+        except ImportError as exc:
+            raise ImportError("Loading LoRA adapter checkpoints requires peft. Install requirements.txt or `pip install peft`.") from exc
+        model = PeftModel.from_pretrained(model, model_name_or_path)
     model.to(device)
     return model
 
