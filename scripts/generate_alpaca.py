@@ -22,6 +22,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max_new_tokens", type=int, default=512)
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--top_p", type=float, default=1.0)
+    parser.add_argument("--repetition_penalty", type=float, default=1.0)
+    parser.add_argument("--no_repeat_ngram_size", type=int, default=0)
     parser.add_argument("--device", default=None, help="Generation device, e.g. cuda:0, cuda:1, or cpu. Defaults to cuda:0 when available.")
     parser.add_argument("--limit", type=int, default=None, help="Generate only the first N selected prompts. Useful for sanity checks.")
     parser.add_argument("--num_shards", type=int, default=1, help="Split the selected prompts into this many interleaved shards.")
@@ -77,6 +79,10 @@ def main() -> None:
             "pad_token_id": tokenizer.pad_token_id,
             "eos_token_id": tokenizer.eos_token_id,
         }
+        if args.repetition_penalty != 1.0:
+            generation_kwargs["repetition_penalty"] = args.repetition_penalty
+        if args.no_repeat_ngram_size > 0:
+            generation_kwargs["no_repeat_ngram_size"] = args.no_repeat_ngram_size
         if args.temperature > 0:
             generation_kwargs["temperature"] = args.temperature
             generation_kwargs["top_p"] = args.top_p
