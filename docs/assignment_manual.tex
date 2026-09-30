@@ -187,22 +187,45 @@ RLHF is powerful but complex. It requires reward modeling, online sampling, rein
 You will \emph{not} implement PPO or full RLHF in this assignment. Instead, you will implement DPO, a simpler preference-learning method.
 
 \subsection{Direct Preference Optimization}
-DPO uses pairwise preference data directly. Each example contains an instruction $x$, a preferred response $y_w$, and a rejected response $y_l$. DPO compares the trainable policy $\pi_\theta$ with a frozen reference model $\pi_{\mathrm{ref}}$, usually the SFT model.
+Direct Preference Optimization (DPO) is a preference-learning method introduced by Rafailov et al. in \resource{\emph{Direct Preference Optimization: Your Language Model is Secretly a Reward Model}}{https://arxiv.org/abs/2305.18290}. It is designed to get many of the benefits of RLHF while avoiding the most complicated parts of a PPO-style reinforcement learning pipeline.
 
-The per-example DPO loss is
-\begin{equation}
-\mathcal{L}_{\text{DPO}}
-= -\log \sigma \left(
-\beta \left[
-\log \frac{\pi_\theta(y_w \mid x)}{\pi_{\mathrm{ref}}(y_w \mid x)}
--
-\log \frac{\pi_\theta(y_l \mid x)}{\pi_{\mathrm{ref}}(y_l \mid x)}
-\right]
-\right),
-\end{equation}
-where $\beta$ controls how strongly the policy is allowed to move away from the reference model.
+The data for DPO is pairwise. Each training example contains:
+\begin{center}
+\texttt{instruction} $x$, \texttt{chosen response} $y_w$, \texttt{rejected response} $y_l$.
+\end{center}
+The chosen response is the answer a human or preference dataset judged better. The rejected response is a worse answer to the same instruction. DPO does not ask the model to imitate only the chosen response. Instead, it asks the model to make the chosen response \emph{more likely than the rejected response}, while staying close to a frozen reference model.
 
-Equivalently,
+\subsubsection{Why DPO Needs a Reference Model}
+If we only pushed the policy to prefer chosen responses over rejected responses, the model could drift too far from the SFT model. That can produce strange outputs, repetition, overconfident refusals, or loss of general helpfulness. DPO therefore compares two models:
+\begin{itemize}[leftmargin=*]
+  \item the \textbf{policy model} $\pi_\theta$, which is trainable;
+  \item the \textbf{reference model} $\pi_{\mathrm{ref}}$, which is frozen and usually initialized from the same SFT checkpoint.
+\end{itemize}
+The reference model acts like an anchor. DPO rewards the policy for improving the chosen-vs-rejected preference \emph{relative to what the SFT model already believed}. This is the part that replaces the explicit KL penalty used in many RLHF pipelines.
+
+\subsubsection{The Loss, Intuitively}
+For each pair, compute four response log probabilities:
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+Quantity & Meaning \\
+\midrule
+$\log \pi_\theta(y_w \mid x)$ & policy log probability of the chosen response \\
+$\log \pi_\theta(y_l \mid x)$ & policy log probability of the rejected response \\
+$\log \pi_{\mathrm{ref}}(y_w \mid x)$ & reference log probability of the chosen response \\
+$\log \pi_{\mathrm{ref}}(y_l \mid x)$ & reference log probability of the rejected response \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Then compare two preference gaps:
+\begin{align}
+  \Delta_\theta &= \log \pi_\theta(y_w \mid x) - \log \pi_\theta(y_l \mid x), \\
+  \Delta_{\mathrm{ref}} &= \log \pi_{\mathrm{ref}}(y_w \mid x) - \log \pi_{\mathrm{ref}}(y_l \mid x).
+\end{align}
+$\Delta_\theta$ says how much the trainable model prefers the chosen response over the rejected response. $\Delta_{\mathrm{ref}}$ says how much the original SFT model already preferred the chosen response. DPO trains the policy so that $\Delta_\theta$ becomes larger than $\Delta_{\mathrm{ref}}$.
+
+The per-example DPO loss is:
 \begin{equation}
 \mathcal{L}_{\text{DPO}}
 = -\log \sigma \left(
@@ -213,10 +236,40 @@ Equivalently,
 \right]
 \right).
 \end{equation}
+Equivalently:
+\begin{equation}
+\mathcal{L}_{\text{DPO}}
+= -\log \sigma \left(
+\beta \left[
+\log \frac{\pi_\theta(y_w \mid x)}{\pi_{\mathrm{ref}}(y_w \mid x)}
+-
+\log \frac{\pi_\theta(y_l \mid x)}{\pi_{\mathrm{ref}}(y_l \mid x)}
+\right]
+\right).
+\end{equation}
+
+The hyperparameter $\beta$ controls how strongly the preference signal is applied. A larger $\beta$ makes the optimization more aggressive. A smaller $\beta$ keeps the policy closer to the reference model. In this assignment, $\beta=0.1$ is the recommended starting point.
 
 \begin{infobox}{DPO in One Sentence}
-DPO does not require training an explicit reward model and does not require online sampling during training. It only requires computing conditional log probabilities for chosen and rejected responses.
+DPO teaches the model to increase the probability gap between preferred and rejected answers, measured relative to a frozen SFT reference model, without training a separate reward model or running online reinforcement learning.
 \end{infobox}
+
+\subsubsection{Step-by-Step DPO Training}
+A single DPO update looks like this:
+\begin{enumerate}[leftmargin=*]
+  \item Format the instruction $x$ exactly the same way for both the chosen and rejected response.
+  \item Tokenize the prompt-response sequence for $y_w$ and for $y_l$.
+  \item Mask prompt tokens so that log probabilities are summed only over response tokens.
+  \item Run the trainable policy model on the chosen and rejected sequences.
+  \item Run the frozen reference model on the same chosen and rejected sequences with gradients disabled.
+  \item Sum token log probabilities over the response span for each sequence.
+  \item Compute the policy preference gap $\Delta_\theta$ and the reference preference gap $\Delta_{\mathrm{ref}}$.
+  \item Apply the DPO logistic loss $-\log \sigma(\beta(\Delta_\theta-\Delta_{\mathrm{ref}}))$.
+  \item Backpropagate only through the policy model.
+  \item Repeat with gradient accumulation, validation, and checkpointing.
+\end{enumerate}
+
+The important implementation idea is that DPO is still ordinary supervised optimization over saved data. There is no environment, no online sampling loop, and no separate reward-model training stage.
 
 \section{What You Will Build}
 You will build a complete small-model alignment pipeline:
@@ -377,7 +430,7 @@ Recommended run size:
 \toprule
 Split & Pairs & Purpose \\
 \midrule
-Train & 15,000 & DPO optimization \\
+Train & 20,000 & DPO optimization \\
 Validation & 1,000 & reward accuracy and margin \\
 \bottomrule
 \end{tabular}
@@ -488,24 +541,46 @@ Implement DPO yourself. Your implementation should include:
 A memory-friendly setup on Kaggle T4x2 is to place the policy on \texttt{cuda:0} and the frozen reference on \texttt{cuda:1}. The trainable policy should remain in fp32 when using gradient scaling; the frozen reference may be loaded in fp16.
 \end{warningbox}
 
+\subsection{Exact Training Setup for the Main Recipe}
+The reference recipe for this assignment is:
+\begin{enumerate}[leftmargin=*]
+  \item Train an SFT checkpoint from \modelname{} using the plain Alpaca-style prompt format.
+  \item Start DPO from the SFT \texttt{best} checkpoint.
+  \item Load a second frozen copy of the same SFT checkpoint as the reference model.
+  \item Place the policy on \texttt{cuda:0} and the reference model on \texttt{cuda:1} when two T4 GPUs are available.
+  \item Use the same prompt template in DPO that was used in SFT. For the main Qwen run, this means \texttt{plain}. For an already instruction-tuned chat model, use that model's tokenizer chat template consistently.
+  \item Train on 20,000 preference pairs and validate on 1,000 pairs.
+  \item Use response-only log probabilities: prompt tokens and padding tokens must not contribute to the chosen or rejected sequence score.
+  \item Use $\beta=0.1$ and a small learning rate, $1\times 10^{-6}$.
+  \item Use gradient accumulation so the effective batch size is 32 even though each device sees only one pair at a time.
+  \item Save the checkpoint with the best validation reward accuracy, plus a final checkpoint.
+\end{enumerate}
+
+The DPO script used for the main run keeps the DPO learning rate fixed. Unlike the SFT script, it does not use warmup or cosine decay by default. This makes the preference optimization easier to reason about for the assignment: if DPO behavior changes, it is mostly due to the preference signal, $\beta$, optimizer choice, and data rather than a changing learning-rate schedule.
+
 \subsection{Suggested Hyperparameters}
 \begin{center}
 \renewcommand{\arraystretch}{1.16}
 \begin{tabularx}{0.88\textwidth}{>{\bfseries\color{DeepNavy}}p{0.42\textwidth} X}
 \rowcolor{MistBlue}
 Hyperparameter & Value \\
-Initial policy & SFT checkpoint \\
-\rowcolor{MistTeal} Reference model & frozen SFT checkpoint \\
-Train pairs & 15,000 \\
-\rowcolor{MistTeal} Validation pairs & 1,000 \\
-Context length & 512 \\
+Initial policy & SFT \texttt{best} checkpoint \\
+\rowcolor{MistTeal} Reference model & frozen SFT \texttt{best} checkpoint \\
+Prompt format & same as SFT; \texttt{plain} for the main Qwen run \\
+\rowcolor{MistTeal} Train pairs & 20,000 \\
+Validation pairs & 1,000 \\
+\rowcolor{MistTeal} Context length & 512 \\
+Maximum prompt length & 256 \\
 \rowcolor{MistTeal} Per-device batch size & 1 \\
 Gradient accumulation & 32 \\
 \rowcolor{MistTeal} Effective batch size & 32 \\
-\rowcolor{MistAmber} Learning rate & $1\times 10^{-6}$ \\
-$\beta$ & 0.1 \\
-\rowcolor{MistAmber} Optimizer & RMSprop or AdamW \\
+\rowcolor{MistAmber} Learning rate & $1\times 10^{-6}$, fixed \\
+Learning-rate decay & none by default for DPO \\
+\rowcolor{MistAmber} $\beta$ & 0.1 \\
+Optimizer & RMSprop or AdamW; AdamW/AdamW8bit is recommended for LoRA variants \\
+\rowcolor{MistTeal} Gradient clipping & 1.0 \\
 Epochs & 1 \\
+Checkpoint selection & best validation reward accuracy \\
 \end{tabularx}
 \end{center}
 
@@ -656,7 +731,7 @@ Discuss examples where:
 \end{enumerate}
 
 \section{Expected Runtime}
-For the recommended 30k SFT, 15k DPO, and 300-prompt evaluation setup, a rough estimate on Kaggle T4x2 is:
+For the recommended 30k SFT, 20k DPO, and 300-prompt evaluation setup, a rough estimate on Kaggle T4x2 is:
 \begin{center}
 \begin{tabular}{lr}
 \toprule
