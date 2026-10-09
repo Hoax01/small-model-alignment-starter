@@ -6,7 +6,7 @@ tqdm
 pyyaml
 sentencepiece
 safetensors
-matplotlib
+trl>=1.0,<2
 peft>=0.11.0
-bitsandbytes>=0.43.0
+matplotlib
 pytest>=8
