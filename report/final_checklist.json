@@ -1,0 +1,126 @@
+{
+  "all_complete": true,
+  "checks": {
+    "Two GPUs, public adapter checks, judge preflight": true,
+    "SFT best and final": true,
+    "HH DPO best and final": true,
+    "UltraFeedback DPO best and final": true,
+    "Persona LoRA adapter": true,
+    "Persona config and trainer history": true,
+    "SFT and DPO metrics": true,
+    "Fixed evaluation sets": true,
+    "Base AlpacaEval generation": true,
+    "HH generations and pairs": true,
+    "UltraFeedback generations and pairs": true,
+    "Persona generations and pairs": true,
+    "Training plots": true,
+    "hh judgments complete": true,
+    "ultrafeedback judgments complete": true,
+    "persona judgments complete": true,
+    "Report PDF (8 pages maximum)": true
+  },
+  "stage_status": {
+    "fixed_prompts": {
+      "state": "complete",
+      "detail": "Artifacts verified",
+      "time": "2026-10-10 16:36:14 UTC"
+    },
+    "generate_base_alpaca": {
+      "state": "complete",
+      "detail": "Artifacts verified",
+      "time": "2026-10-10 16:47:52 UTC"
+    },
+    "train_sft": {
+      "state": "complete",
+      "detail": "Artifacts verified",
+      "time": "2026-10-10 18:07:56 UTC"
+    },
+    "train_dpo_hh": {
+      "state": "complete",
+      "detail": "Artifacts verified",
+      "time": "2026-10-10 19:37:29 UTC"
+    },
+    "train_dpo_ultrafeedback": {
+      "state": "complete",
+      "detail": "Artifacts verified",
+      "time": "2026-10-10 21:30:17 UTC"
+    },
+    "train_persona_lora": {
+      "state": "complete",
+      "detail": "Artifacts verified",
+      "time": "2026-10-10 21:36:16 UTC"
+    },
+    "plots": {
+      "state": "complete",
+      "detail": "Artifacts verified",
+      "time": "2026-10-10 21:36:18 UTC"
+    },
+    "generate_sft_hh": {
+      "state": "complete",
+      "detail": "Artifacts verified",
+      "time": "2026-10-10 21:46:57 UTC"
+    },
+    "generate_dpo_hh_hh": {
+      "state": "complete",
+      "detail": "Artifacts verified",
+      "time": "2026-10-10 21:56:18 UTC"
+    },
+    "generate_sft_alpaca": {
+      "state": "complete",
+      "detail": "Artifacts verified",
+      "time": "2026-10-10 22:07:28 UTC"
+    },
+    "generate_dpo_ultrafeedback_alpaca": {
+      "state": "complete",
+      "detail": "Artifacts verified",
+      "time": "2026-10-10 22:18:54 UTC"
+    },
+    "generate_persona_base_style": {
+      "state": "complete",
+      "detail": "Artifacts verified",
+      "time": "2026-10-10 22:19:53 UTC"
+    },
+    "generate_persona_lora_style": {
+      "state": "complete",
+      "detail": "Artifacts verified",
+      "time": "2026-10-10 22:21:06 UTC"
+    },
+    "pairs_hh": {
+      "state": "complete",
+      "detail": "Artifacts verified",
+      "time": "2026-10-10 22:21:08 UTC"
+    },
+    "pairs_ultrafeedback": {
+      "state": "complete",
+      "detail": "Artifacts verified",
+      "time": "2026-10-10 22:21:10 UTC"
+    },
+    "pairs_persona": {
+      "state": "complete",
+      "detail": "Artifacts verified",
+      "time": "2026-10-10 22:21:12 UTC"
+    },
+    "judge_hh": {
+      "state": "complete",
+      "detail": "Artifacts verified",
+      "time": "2026-10-10 22:34:29 UTC"
+    },
+    "judge_ultrafeedback": {
+      "state": "complete",
+      "detail": "Artifacts verified",
+      "time": "2026-10-10 22:54:13 UTC"
+    },
+    "judge_persona": {
+      "state": "complete",
+      "detail": "Artifacts verified",
+      "time": "2026-10-10 22:54:55 UTC"
+    },
+    "report": {
+      "state": "complete",
+      "detail": "5 pages; full evaluation=True",
+      "time": "2026-10-10 22:54:56 UTC"
+    }
+  },
+  "repo_url": "https://github.com/Hoax01/small-model-alignment-starter.git",
+  "judge_model": "google/gemini-3-flash-preview"
+}

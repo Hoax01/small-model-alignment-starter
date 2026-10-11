@@ -26,13 +26,13 @@ def main():
 
     if args.sft:
         rows = read_jsonl(args.sft)
-        epochs = [row["epoch"] for row in rows]
+        steps = [row["step"] for row in rows]
         fig, ax = plt.subplots(figsize=(7, 4.5))
-        ax.plot(epochs, [row["train_loss"] for row in rows], marker="o", label="Train")
+        ax.plot(steps, [row["train_loss"] for row in rows], marker="o", label="Train")
         val = [row.get("validation_loss") for row in rows]
         if any(value is not None for value in val):
-            ax.plot(epochs, val, marker="o", label="Validation")
-        ax.set(title="SFT loss", xlabel="Epoch", ylabel="Response-token NLL")
+            ax.plot(steps, val, marker="o", label="Validation")
+        ax.set(title="SFT loss", xlabel="Optimizer step", ylabel="Response-token NLL")
         ax.grid(alpha=0.25)
         ax.legend()
         fig.tight_layout()
@@ -46,18 +46,18 @@ def main():
         fig, axes = plt.subplots(1, 3, figsize=(14, 4.2))
         for path, label in zip(args.dpo, labels):
             rows = read_jsonl(path)
-            epochs = [row["epoch"] for row in rows]
-            axes[0].plot(epochs, [row["train_loss"] for row in rows], marker="o", label=f"{label} train")
+            steps = [row["step"] for row in rows]
+            axes[0].plot(steps, [row["train_loss"] for row in rows], marker="o", label=f"{label} train")
             val = [row.get("validation_loss") for row in rows]
             if any(value is not None for value in val):
-                axes[0].plot(epochs, val, marker="s", linestyle="--", label=f"{label} validation")
+                axes[0].plot(steps, val, marker="s", linestyle="--", label=f"{label} validation")
             accuracy = [row.get("reward_accuracy") for row in rows]
             margin = [row.get("reward_margin") for row in rows]
-            axes[1].plot(epochs, accuracy, marker="o", label=label)
-            axes[2].plot(epochs, margin, marker="o", label=label)
-        axes[0].set(title="DPO loss", xlabel="Epoch", ylabel="Loss")
-        axes[1].set(title="Validation reward accuracy", xlabel="Epoch", ylabel="Accuracy")
-        axes[2].set(title="Validation reward margin", xlabel="Epoch", ylabel="Margin")
+            axes[1].plot(steps, accuracy, marker="o", label=label)
+            axes[2].plot(steps, margin, marker="o", label=label)
+        axes[0].set(title="DPO loss", xlabel="Optimizer step", ylabel="Loss")
+        axes[1].set(title="Validation reward accuracy", xlabel="Optimizer step", ylabel="Accuracy")
+        axes[2].set(title="Validation reward margin", xlabel="Optimizer step", ylabel="Margin")
         for ax in axes:
             ax.grid(alpha=0.25)
             ax.legend(fontsize=8)

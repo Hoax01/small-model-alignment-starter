@@ -191,6 +191,14 @@ def train_sft(model, tokenizer, train_rows, validation_rows, config: SFTConfig) 
                 optimizer.zero_grad(set_to_none=True)
                 scheduler.step()
                 updates += 1
+                if updates % 100 == 0:
+                    recent = loss_values[-100 * config.gradient_accumulation_steps:]
+                    _append_jsonl(metrics, {
+                        "track": "sft", "epoch": epoch + 1, "step": updates,
+                        "train_loss": sum(recent) / len(recent),
+                        "validation_loss": None,
+                        "learning_rate": optimizer.param_groups[0]["lr"],
+                    })
 
         val_loss = evaluate_sft(model, tokenizer, validation_rows, config) if validation_rows else None
         row = {
@@ -306,6 +314,16 @@ def train_dpo(policy, reference, tokenizer, train_rows, validation_rows, config:
                 scaler.update()
                 optimizer.zero_grad(set_to_none=True)
                 updates += 1
+                if updates % 100 == 0:
+                    recent = losses[-100 * config.gradient_accumulation_steps:]
+                    _append_jsonl(metrics, {
+                        "track": "dpo", "epoch": epoch + 1, "step": updates,
+                        "train_loss": sum(recent) / len(recent),
+                        "validation_loss": None,
+                        "reward_accuracy": None,
+                        "reward_margin": None,
+                        "learning_rate": optimizer.param_groups[0]["lr"],
+                    })
 
         val = evaluate_dpo(policy, reference, tokenizer, validation_rows, config) if validation_rows else None
         row = {

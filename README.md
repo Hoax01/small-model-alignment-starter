@@ -15,6 +15,8 @@ SFT loss averages over response tokens only. Prompt/padding labels are masked wi
 
 Keep Kaggle's installed PyTorch/CUDA build; do not reinstall torch.
 
+For the complete PA2 run, import `PA2_kaggle_all_in_one.ipynb` into Kaggle, select **T4 x2** and enable Internet, then run its setup and preflight cells. Once both GPUs, the public adapter checks, and the judge ping pass, choose **Save Version → Save & Run All**. This starts a clean background run and saves the generated `/kaggle/working` files when it finishes. The notebook includes dataset downloads, all training tracks, generation, blinded judging, plots, a PDF report, an evidence ZIP, and a final checklist. Check `outputs/final_checklist.json` in the saved version before submitting.
+
 ~~~bash
 python -m pip install -q -r requirements.txt
 python -m pip install -q -e . --no-deps
@@ -81,8 +83,22 @@ python -m scripts.build_pairwise --sft /kaggle/working/outputs/generations/sft.j
 python -m scripts.judge_pairs --pairs /kaggle/working/outputs/evaluation/pairs.jsonl --output /kaggle/working/outputs/evaluation/judgments.jsonl --model google/gemini-3.6-flash --batch-size 5 --sleep-seconds 5 --max-retries 3
 ~~~
 
-Run the generation and pair-judging commands from the Kaggle notebook. The judge uses Kaggle's model proxy with `google/gemini-3.6-flash`; the script batches five comparisons, waits at least five seconds between requests, retries up to three times, resumes completed comparisons, records unresolved failures separately, and reports win/loss/tie/unknown plus failure/retry rates.
+Run the generation and pair-judging commands from the Kaggle notebook. The all-in-one notebook selects an available Kaggle model-proxy judge, uses `scripts.judge_pairs_reliable`, batches five comparisons, waits at least five seconds between requests, retries up to three times, recovers malformed batches one case at a time, resumes completed comparisons, and reports win/loss/tie/unknown plus failure/retry rates.
 
-Generate plots from the logged training metrics with `python -m scripts.plot_metrics`. Fill `docs/REPORT_TEMPLATE.md` after the Kaggle runs; it follows the required eight-page report structure. Full model runs, downloads, and Kaggle judging have not been run locally.
+Generate plots from the logged training metrics with `python -m scripts.plot_metrics`. The all-in-one notebook builds a report from its actual outputs; review the PDF before submission. Full model runs, downloads, and Kaggle judging require Kaggle and have not been run locally.
 
 Kaggle sessions are temporary. Save important outputs under `/kaggle/working`, save notebook versions, and archive checkpoints/generations as zip files or Kaggle output datasets before ending a session.
+
+## Completed Kaggle run and submission evidence
+
+The all-in-one notebook completed the SFT, HH-RLHF DPO, UltraFeedback DPO, and persona LoRA runs on two Tesla T4 GPUs. All seven public adapter checks passed. The final checklist reports all 17 required artifact checks complete, including 300 resolved judgments for each full-model DPO comparison and eight resolved persona judgments.
+
+| Comparison | Wins / ties / losses | Win rate with ties worth half |
+| --- | ---: | ---: |
+| HH DPO versus SFT | 154 / 68 / 78 | 62.7% |
+| UltraFeedback DPO versus SFT | 105 / 70 / 125 | 46.7% |
+| Persona LoRA versus base SmolLM2 | 1 / 6 / 1 | 50.0% |
+
+The judge was `google/gemini-3-flash-preview`; all comparisons were resolved, with no unknown judgments. The [five-page final report](report/PA2_final_report.pdf), [evaluation summary](report/evaluation_summary.json), [plots](report/plots), and [final checklist](report/final_checklist.json) are included here. [PA2_evidence.zip](PA2_evidence.zip) contains the fixed evaluation sets, generated responses, blinded pairs, judgments, metrics, logs, plots, report, and source snapshot without large model weights. Best and final full-model checkpoints remain in the saved Kaggle notebook output.
+
+The source commit named in the report is the base commit cloned at the start of the Kaggle job. The notebook applied the later source patches included in this repository and the evidence ZIP before training.
